@@ -5,12 +5,15 @@ export class NetworkManager {
         this.app = app;
         this.socket = null;
         this.userId = this.generateUserId();
-        this.roomId = this.getRoomIdFromUrl() || this.generateRoomId();
+        this.roomId = this.getRoomIdFromUrl() || 'public-session'; // Default public session
         this.isConnected = false;
         this.isHost = false;
+        this.isSessionHost = false; // Host of the entire session
+        this.sessionMode = 'public'; // 'public', 'private', or 'local'
         this.lastPositionUpdate = 0;
         this.positionUpdateThrottle = 100; // ms
         
+        this.detectSessionMode();
         this.init();
     }
     
@@ -22,8 +25,8 @@ export class NetworkManager {
             // Local development
             serverUrl = 'http://localhost:3001';
         } else {
-            // Production - use Railway backend
-            serverUrl = 'https://threeatre-backend-production.up.railway.app';
+            // Production - try multiple backend options
+            serverUrl = this.getProductionServerUrl();
         }
         
         this.socket = io(serverUrl, {
@@ -35,6 +38,7 @@ export class NetworkManager {
         this.setupEventListeners();
         this.updateUrl();
         this.updateRoomIdDisplay();
+        this.updateSessionStatus();
     }
     
     setupEventListeners() {
@@ -53,8 +57,8 @@ export class NetworkManager {
         
         this.socket.on('connect_error', (error) => {
             console.error('Connection error:', error);
-            this.updateConnectionStatus('Offline Mode');
-            this.enableOfflineMode();
+            this.updateConnectionStatus('P2P Mode');
+            this.enableP2PMode();
         });
         
         this.socket.on('room-joined', (data) => {
@@ -334,10 +338,15 @@ export class NetworkManager {
         });
     }
     
-    enableOfflineMode() {
-        console.log('Enabling offline mode - single player experience');
+    enableP2PMode() {
+        console.log('Enabling P2P mode - peer-to-peer session');
         
-        // Simulate being connected for single player
+        // Import and initialize P2P session manager
+        import('./P2PSessionManager.js').then(({ P2PSessionManager }) => {
+            this.p2pManager = new P2PSessionManager(this.app);
+        });
+        
+        // Simulate being connected for P2P
         this.isConnected = false;
         this.isHost = true;
         
@@ -354,35 +363,84 @@ export class NetworkManager {
             this.app.theatre.addUser(localUserData.id, localUserData);
         }
         
-        // Update UI for offline mode
+        // Update UI for P2P mode
         this.updateUserCount(1);
         this.updateHostStatus(this.userId);
         this.updateRoomIdDisplay();
         
-        // Show offline mode message
-        this.showOfflineMessage();
+        // Show P2P mode message
+        this.showP2PMessage();
     }
     
-    showOfflineMessage() {
+    getProductionServerUrl() {
+        // For now, we'll need to deploy the backend separately
+        // This could be Railway, Render, Heroku, or any Node.js hosting service
+        
+        // Try common deployment URLs (you'll need to update this with your actual backend URL)
+        const possibleUrls = [
+            'https://threeatre-backend.onrender.com',
+            'https://threeatre-backend-production.up.railway.app',
+            'https://threeatre-backend.herokuapp.com'
+        ];
+        
+        // For now, return the first option - you'll need to update this
+        console.log('⚠️ Backend server URL needs to be configured for multiplayer');
+        return possibleUrls[0];
+    }
+    
+    detectSessionMode() {
+        if (window.location.hostname === 'localhost') {
+            this.sessionMode = 'local';
+        } else if (this.getRoomIdFromUrl() && this.getRoomIdFromUrl() !== 'public-session') {
+            this.sessionMode = 'private';
+        } else {
+            this.sessionMode = 'public';
+        }
+        
+        console.log('Session mode detected:', this.sessionMode);
+    }
+    
+    updateSessionStatus() {
+        const statusElement = document.getElementById('privacy-status');
+        if (!statusElement) return;
+        
+        switch (this.sessionMode) {
+            case 'local':
+                statusElement.textContent = 'Local network session';
+                statusElement.style.color = '#00ffff';
+                break;
+            case 'private':
+                statusElement.textContent = 'Private room - invite only';
+                statusElement.style.color = '#ffa500';
+                break;
+            case 'public':
+                statusElement.textContent = this.isSessionHost ? 'Hosting public session' : 'Joined public session';
+                statusElement.style.color = '#4CAF50';
+                break;
+        }
+    }
+    
+    showP2PMessage() {
         const messageDiv = document.createElement('div');
         messageDiv.style.cssText = `
             position: fixed;
             top: 100px;
             left: 50%;
             transform: translateX(-50%);
-            background: rgba(255, 165, 0, 0.2);
-            border: 1px solid #ffa500;
+            background: rgba(0, 255, 0, 0.2);
+            border: 1px solid #4CAF50;
             border-radius: 12px;
             padding: 16px 24px;
-            color: #ffa500;
+            color: #4CAF50;
             font-size: 14px;
             z-index: 1000;
             text-align: center;
             backdrop-filter: blur(10px);
         `;
         messageDiv.innerHTML = `
-            🔌 Offline Mode<br>
-            <span style="font-size: 12px; opacity: 0.8;">Enjoying single-player theatre experience</span>
+            🌐 P2P Session Mode<br>
+            <span style="font-size: 12px; opacity: 0.8;">Share this URL for friends to join your session!</span><br>
+            <span style="font-size: 11px; opacity: 0.6;">Direct peer-to-peer connection</span>
         `;
         
         document.body.appendChild(messageDiv);

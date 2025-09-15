@@ -44,6 +44,7 @@ class TheatreApp {
         this.tomatoChargeStart = 0;
         this.tomatoPower = 0;
         this.maxTomatoPower = 3.0;
+        this.isPrivateRoom = false;
         
         this.init();
         this.setupEventListeners();
@@ -108,6 +109,9 @@ class TheatreApp {
         
         // Handle window resize
         window.addEventListener('resize', () => this.onWindowResize());
+        
+        // Initialize privacy UI
+        setTimeout(() => this.updatePrivacyUI(), 1000);
     }
     
     async initRenderer() {
@@ -194,6 +198,11 @@ class TheatreApp {
         // UI Toggle Button
         document.getElementById('toggle-ui').addEventListener('click', () => {
             this.toggleUI();
+        });
+        
+        // Privacy Toggle Button
+        document.getElementById('privacy-toggle').addEventListener('click', () => {
+            this.togglePrivacy();
         });
     }
     
@@ -619,6 +628,59 @@ class TheatreApp {
         
         if (meter) document.body.removeChild(meter);
         if (text) document.body.removeChild(text);
+    }
+    
+    togglePrivacy() {
+        if (this.networkManager.sessionMode === 'local') {
+            // Local mode - toggle between local and attempting public
+            if (this.isPrivateRoom) {
+                // Switch to public attempt
+                this.isPrivateRoom = false;
+                this.showMessage('Attempting to join public session...', 'info');
+                // Reload to try connecting to public session
+                window.location.search = '';
+            } else {
+                // Switch to private local
+                this.isPrivateRoom = true;
+                this.showMessage('Switched to private local session', 'info');
+            }
+        } else {
+            // Production mode - create private room
+            this.isPrivateRoom = !this.isPrivateRoom;
+            
+            if (this.isPrivateRoom) {
+                // Generate new private room
+                const privateRoomId = this.networkManager.generateRoomId();
+                window.location.search = `?room=${privateRoomId}`;
+            } else {
+                // Go back to public session
+                window.location.search = '';
+            }
+        }
+        
+        this.updatePrivacyUI();
+    }
+    
+    updatePrivacyUI() {
+        const button = document.getElementById('privacy-toggle');
+        const status = document.getElementById('privacy-status');
+        
+        if (this.networkManager.sessionMode === 'local') {
+            button.textContent = '🏠 Local';
+            button.style.background = 'linear-gradient(135deg, rgba(0, 255, 255, 0.2), rgba(0, 150, 255, 0.3))';
+            status.textContent = 'Local network session';
+            status.style.color = '#00ffff';
+        } else if (this.isPrivateRoom) {
+            button.textContent = '🔒 Private';
+            button.style.background = 'linear-gradient(135deg, rgba(255, 165, 0, 0.2), rgba(255, 140, 0, 0.3))';
+            status.textContent = 'Private room - share URL to invite';
+            status.style.color = '#ffa500';
+        } else {
+            button.textContent = '🌐 Public';
+            button.style.background = 'linear-gradient(135deg, rgba(0, 255, 0, 0.2), rgba(0, 200, 0, 0.3))';
+            status.textContent = this.networkManager.isSessionHost ? 'Hosting public session' : 'Joined public session';
+            status.style.color = '#4CAF50';
+        }
     }
     
     toggleUI() {
