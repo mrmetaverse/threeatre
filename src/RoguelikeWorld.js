@@ -479,6 +479,14 @@ export class RoguelikeWorld {
         this.playerScore += 1;
         this.updateScoreDisplay();
         
+        // Generate random loot
+        const loot = this.generateTreasureLoot();
+        
+        // Add loot to bindle if available
+        if (this.theatre.app && this.theatre.app.bindle) {
+            this.theatre.app.bindle.addLoot(loot);
+        }
+        
         // Create treasure opening effect
         this.createTreasureEffect();
         
@@ -1269,6 +1277,31 @@ export class RoguelikeWorld {
             return returnDistance < 3;
         }
         return false;
+    }
+    
+    generateTreasureLoot() {
+        const lootTable = [
+            // Common items
+            { type: 'consumable', name: 'Golden Tomato', icon: '🥇', description: 'A magical golden tomato with extra power', stackable: true, quantity: 3, rarity: 'uncommon' },
+            { type: 'equipment', name: 'Ghost Ward Ring', icon: '💍', description: 'Protects against ghost attacks', slot: 'accessory1', stats: { protection: +1 }, rarity: 'rare' },
+            { type: 'equipment', name: 'Spectral Boots', icon: '👻', description: 'Walk silently through the maze', slot: 'feet', stats: { stealth: +2, speed: +1 }, rarity: 'epic' },
+            { type: 'equipment', name: 'Treasure Hunter Hat', icon: '🎩', description: 'Increases treasure finding luck', slot: 'head', stats: { luck: +3 }, rarity: 'rare' },
+            { type: 'equipment', name: 'Phantom Cloak', icon: '🧥', description: 'Reduces ghost detection range', slot: 'chest', stats: { stealth: +3, protection: +1 }, rarity: 'epic' },
+            { type: 'consumable', name: 'Courage Potion', icon: '🧪', description: 'Temporarily increases all stats', stackable: true, quantity: 1, rarity: 'rare' },
+            { type: 'equipment', name: 'Ancient Amulet', icon: '🔮', description: 'Mysterious powers from the pyramid', slot: 'accessory2', stats: { power: +2, luck: +1 }, rarity: 'legendary' }
+        ];
+        
+        // Random selection with rarity weighting
+        const rarityWeights = { common: 50, uncommon: 30, rare: 15, epic: 4, legendary: 1 };
+        const availableItems = lootTable.filter(item => {
+            const weight = rarityWeights[item.rarity] || 1;
+            return Math.random() * 100 < weight;
+        });
+        
+        const selectedItem = availableItems[Math.floor(Math.random() * availableItems.length)] || lootTable[0];
+        
+        console.log('Generated treasure loot:', selectedItem.name, `(${selectedItem.rarity})`);
+        return selectedItem;
     }
     
     dispose() {

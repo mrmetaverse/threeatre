@@ -17,6 +17,7 @@ export class Theatre {
         this.camera = null; // Will be set by main app
         this.exitPortal = null;
         this.networkManager = null; // Will be set by main app
+        this.app = null; // Reference to main app for bindle access
         
         this.init();
     }
@@ -763,6 +764,11 @@ export class Theatre {
     // Set network manager for world transitions
     setNetworkManager(networkManager) {
         this.networkManager = networkManager;
+    }
+    
+    // Set main app reference for bindle access
+    setApp(app) {
+        this.app = app;
     }
     
     // New method for VRM avatar upload

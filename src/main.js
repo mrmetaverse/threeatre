@@ -5,6 +5,7 @@ import { WebXRManager } from './WebXRManager.js';
 import { NetworkManager } from './NetworkManager.js';
 import { OMISeat } from './OMISeat.js';
 import { ChatManager } from './ChatManager.js';
+import { Bindle } from './Bindle.js';
 
 class TheatreApp {
     constructor() {
@@ -17,6 +18,7 @@ class TheatreApp {
         this.orbitControls = null;
         this.omiSeat = null;
         this.chatManager = null;
+        this.bindle = null;
         this.isHost = false;
         this.users = new Map();
         this.controls = {
@@ -83,6 +85,9 @@ class TheatreApp {
         // Connect network manager to theatre
         this.theatre.setNetworkManager(this.networkManager);
         
+        // Connect main app reference to theatre
+        this.theatre.setApp(this);
+        
         // Setup orbit controls for better camera movement
         this.setupOrbitControls();
         
@@ -91,6 +96,9 @@ class TheatreApp {
         
         // Setup chat system
         this.chatManager = new ChatManager(this.networkManager, this.scene);
+        
+        // Setup bindle inventory system
+        this.bindle = new Bindle(this.networkManager);
         
         // Setup lighting
         this.setupLighting();
