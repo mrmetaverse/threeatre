@@ -9,7 +9,13 @@ const server = createServer(app);
 // Configure CORS for Socket.IO
 const io = new Server(server, {
     cors: {
-        origin: ["http://localhost:3000", "http://127.0.0.1:3000"],
+        origin: [
+            "http://localhost:3000", 
+            "http://127.0.0.1:3000",
+            "https://threeatre-gc6sw3n1x-jesse-altons-projects.vercel.app",
+            "https://threeatre.vercel.app",
+            /^https:\/\/.*\.vercel\.app$/
+        ],
         methods: ["GET", "POST"],
         credentials: true
     },
@@ -18,6 +24,16 @@ const io = new Server(server, {
 
 app.use(cors());
 app.use(express.json());
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+    res.json({ 
+        status: 'healthy', 
+        timestamp: new Date().toISOString(),
+        rooms: rooms.size,
+        totalUsers: Array.from(rooms.values()).reduce((total, room) => total + room.users.size, 0)
+    });
+});
 
 // Store room data
 const rooms = new Map();

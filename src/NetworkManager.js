@@ -15,10 +15,16 @@ export class NetworkManager {
     }
     
     init() {
-        // Use current domain for production, localhost for development
-        const serverUrl = window.location.hostname === 'localhost' 
-            ? 'http://localhost:3001'
-            : window.location.origin;
+        // Use environment-specific server URLs
+        let serverUrl;
+        
+        if (window.location.hostname === 'localhost') {
+            // Local development
+            serverUrl = 'http://localhost:3001';
+        } else {
+            // Production - use Railway backend
+            serverUrl = 'https://threeatre-backend-production.up.railway.app';
+        }
         
         this.socket = io(serverUrl, {
             transports: ['websocket', 'polling'],
@@ -47,7 +53,8 @@ export class NetworkManager {
         
         this.socket.on('connect_error', (error) => {
             console.error('Connection error:', error);
-            this.updateConnectionStatus('Connection Error');
+            this.updateConnectionStatus('Offline Mode');
+            this.enableOfflineMode();
         });
         
         this.socket.on('room-joined', (data) => {
@@ -325,6 +332,66 @@ export class NetworkManager {
         }).catch(err => {
             console.error('Failed to copy room URL:', err);
         });
+    }
+    
+    enableOfflineMode() {
+        console.log('Enabling offline mode - single player experience');
+        
+        // Simulate being connected for single player
+        this.isConnected = false;
+        this.isHost = true;
+        
+        // Add local user to scene
+        const localUserData = {
+            id: this.userId,
+            name: `User ${this.userId.slice(-4)}`,
+            color: this.generateUserColor(),
+            position: { x: 0, y: 6, z: 24 }
+        };
+        
+        // Add user to theatre
+        if (this.app && this.app.theatre) {
+            this.app.theatre.addUser(localUserData.id, localUserData);
+        }
+        
+        // Update UI for offline mode
+        this.updateUserCount(1);
+        this.updateHostStatus(this.userId);
+        this.updateRoomIdDisplay();
+        
+        // Show offline mode message
+        this.showOfflineMessage();
+    }
+    
+    showOfflineMessage() {
+        const messageDiv = document.createElement('div');
+        messageDiv.style.cssText = `
+            position: fixed;
+            top: 100px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255, 165, 0, 0.2);
+            border: 1px solid #ffa500;
+            border-radius: 12px;
+            padding: 16px 24px;
+            color: #ffa500;
+            font-size: 14px;
+            z-index: 1000;
+            text-align: center;
+            backdrop-filter: blur(10px);
+        `;
+        messageDiv.innerHTML = `
+            🔌 Offline Mode<br>
+            <span style="font-size: 12px; opacity: 0.8;">Enjoying single-player theatre experience</span>
+        `;
+        
+        document.body.appendChild(messageDiv);
+        
+        setTimeout(() => {
+            if (document.body.contains(messageDiv)) {
+                document.body.removeChild(messageDiv);
+            }
+        }, 5000);
     }
     
     disconnect() {
