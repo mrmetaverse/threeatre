@@ -15,8 +15,10 @@ export class NetworkManager {
     }
     
     init() {
-        // For development, use localhost. In production, this would be your server
-        const serverUrl = 'http://localhost:3001';
+        // Use current domain for production, localhost for development
+        const serverUrl = window.location.hostname === 'localhost' 
+            ? 'http://localhost:3001'
+            : window.location.origin;
         
         this.socket = io(serverUrl, {
             transports: ['websocket', 'polling'],
