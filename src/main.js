@@ -794,27 +794,41 @@ class TheatreApp {
             });
         });
         
-        const intersects = this.raycaster.intersectObjects(seatMeshes, false);
-        
-        if (intersects.length > 0) {
-            const clickedMesh = intersects[0].object;
-            const seatIndex = clickedMesh.userData.seatIndex;
-            
-            console.log('Clicked seat:', seatIndex);
-            
-            // Check if seat is available
-            const seatInfo = this.theatre.seats[seatIndex];
-            if (seatInfo && !seatInfo.occupied) {
-                // Use OMI_seat to sit down locally first
-                this.omiSeat.sitInSeat(seatInfo);
-                
-                // Then request seat from server
-                if (this.networkManager) {
-                    this.networkManager.requestSeat(seatIndex);
+        // Check for treasure chest click first (if in dangerous world)
+        if (this.theatre.roguelikeWorld.isActive && this.theatre.roguelikeWorld.treasureChest) {
+            const treasureIntersects = this.raycaster.intersectObjects([this.theatre.roguelikeWorld.treasureChest], true);
+            if (treasureIntersects.length > 0) {
+                const opened = this.theatre.roguelikeWorld.openTreasureChest();
+                if (opened) {
+                    return; // Don't process other clicks
                 }
-            } else if (seatInfo && seatInfo.occupied) {
-                console.log('Seat is occupied by:', seatInfo.userId);
-                this.showMessage('Seat is occupied', 'error');
+            }
+        }
+        
+        // Check for seat clicks (only in theatre)
+        if (!this.theatre.roguelikeWorld.isActive) {
+            const intersects = this.raycaster.intersectObjects(seatMeshes, false);
+            
+            if (intersects.length > 0) {
+                const clickedMesh = intersects[0].object;
+                const seatIndex = clickedMesh.userData.seatIndex;
+                
+                console.log('Clicked seat:', seatIndex);
+                
+                // Check if seat is available
+                const seatInfo = this.theatre.seats[seatIndex];
+                if (seatInfo && !seatInfo.occupied) {
+                    // Use OMI_seat to sit down locally first
+                    this.omiSeat.sitInSeat(seatInfo);
+                    
+                    // Then request seat from server
+                    if (this.networkManager) {
+                        this.networkManager.requestSeat(seatIndex);
+                    }
+                } else if (seatInfo && seatInfo.occupied) {
+                    console.log('Seat is occupied by:', seatInfo.userId);
+                    this.showMessage('Seat is occupied', 'error');
+                }
             }
         }
     }

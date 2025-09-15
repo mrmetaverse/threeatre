@@ -99,6 +99,9 @@ export class RoguelikeWorld {
         // Spawn ghosts
         this.spawnGhosts();
         
+        // Spawn secret treasure chest
+        this.spawnTreasureChest();
+        
         // Setup world lighting
         this.setupWorldLighting();
         
@@ -266,6 +269,337 @@ export class RoguelikeWorld {
         signMesh.add(subText);
     }
     
+    spawnTreasureChest() {
+        // Find a random far location for the treasure chest
+        const treasurePosition = this.getRandomTreasurePosition();
+        if (!treasurePosition) {
+            console.warn('Could not find suitable treasure position');
+            return;
+        }
+        
+        this.treasurePosition = treasurePosition;
+        this.treasureChest = this.createTreasureChest(treasurePosition);
+        this.scene.add(this.treasureChest);
+        
+        console.log('💰 Secret treasure chest spawned at:', treasurePosition);
+    }
+    
+    getRandomTreasurePosition() {
+        // Find floor positions that are far from the entrance
+        const farFloorCells = [];
+        const entranceX = Math.floor(this.maze[0].length / 2);
+        const entranceZ = 1;
+        
+        for (let z = 0; z < this.maze.length; z++) {
+            for (let x = 0; x < this.maze[z].length; x++) {
+                if (this.maze[z][x] === 0) {
+                    // Calculate distance from entrance
+                    const distance = Math.sqrt((x - entranceX) ** 2 + (z - entranceZ) ** 2);
+                    
+                    // Only consider positions that are far from entrance
+                    if (distance > this.maze.length * 0.6) {
+                        farFloorCells.push([x, z]);
+                    }
+                }
+            }
+        }
+        
+        if (farFloorCells.length === 0) return null;
+        
+        const [x, z] = farFloorCells[Math.floor(Math.random() * farFloorCells.length)];
+        const worldX = (x - this.maze[0].length / 2) * this.cellSize;
+        const worldZ = (z - this.maze.length / 2) * this.cellSize + 30;
+        
+        return new THREE.Vector3(worldX, 0, worldZ);
+    }
+    
+    createTreasureChest(position) {
+        const chestGroup = new THREE.Group();
+        
+        // Chest base
+        const baseGeometry = new THREE.BoxGeometry(2, 1, 1.5);
+        const baseMaterial = new THREE.MeshLambertMaterial({ 
+            color: 0x8B4513,
+            emissive: 0x2F1B14,
+            emissiveIntensity: 0.1
+        });
+        const base = new THREE.Mesh(baseGeometry, baseMaterial);
+        base.position.y = 0.5;
+        base.castShadow = true;
+        chestGroup.add(base);
+        
+        // Chest lid
+        const lidGeometry = new THREE.BoxGeometry(2.1, 0.3, 1.6);
+        const lidMaterial = new THREE.MeshLambertMaterial({ 
+            color: 0x654321,
+            emissive: 0x2F1B14,
+            emissiveIntensity: 0.1
+        });
+        const lid = new THREE.Mesh(lidGeometry, lidMaterial);
+        lid.position.y = 1.15;
+        lid.castShadow = true;
+        chestGroup.add(lid);
+        
+        // Golden bands
+        for (let i = 0; i < 3; i++) {
+            const bandGeometry = new THREE.BoxGeometry(2.2, 0.1, 0.1);
+            const bandMaterial = new THREE.MeshBasicMaterial({ 
+                color: 0xFFD700,
+                emissive: 0xFFD700,
+                emissiveIntensity: 0.3
+            });
+            const band = new THREE.Mesh(bandGeometry, bandMaterial);
+            band.position.set(0, 0.3 + (i * 0.3), 0.8);
+            chestGroup.add(band);
+        }
+        
+        // Golden lock
+        const lockGeometry = new THREE.CylinderGeometry(0.2, 0.2, 0.3, 8);
+        const lockMaterial = new THREE.MeshBasicMaterial({ 
+            color: 0xFFD700,
+            emissive: 0xFFD700,
+            emissiveIntensity: 0.5
+        });
+        const lock = new THREE.Mesh(lockGeometry, lockMaterial);
+        lock.position.set(0, 0.8, 0.8);
+        lock.rotation.x = Math.PI / 2;
+        chestGroup.add(lock);
+        
+        // Magical glow around chest
+        const glowGeometry = new THREE.SphereGeometry(3, 16, 12);
+        const glowMaterial = new THREE.MeshBasicMaterial({ 
+            color: 0xFFD700,
+            transparent: true,
+            opacity: 0.1,
+            side: THREE.BackSide
+        });
+        const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+        glow.position.y = 1;
+        chestGroup.add(glow);
+        
+        // Position chest
+        chestGroup.position.copy(position);
+        chestGroup.position.y += 0.5;
+        chestGroup.name = 'treasure-chest';
+        
+        // Add pulsing glow animation
+        chestGroup.userData.glowAnimation = () => {
+            const time = Date.now() * 0.003;
+            glow.material.opacity = 0.05 + Math.sin(time) * 0.05;
+            
+            // Make golden parts pulse
+            lock.material.emissiveIntensity = 0.3 + Math.sin(time * 1.5) * 0.2;
+            chestGroup.children.forEach(child => {
+                if (child.material && child.material.color && child.material.color.getHex() === 0xFFD700) {
+                    child.material.emissiveIntensity = 0.2 + Math.sin(time * 1.2) * 0.1;
+                }
+            });
+        };
+        
+        return chestGroup;
+    }
+    
+    checkTreasureInteraction(playerPosition) {
+        if (!this.treasureChest || !this.treasurePosition) return;
+        
+        const distance = playerPosition.distanceTo(this.treasurePosition);
+        
+        if (distance < 3) {
+            // Show interaction prompt
+            this.showTreasurePrompt();
+            
+            // Check for click interaction (we'll add this to the main click handler)
+            if (distance < 1.5) {
+                // Close enough to interact
+                this.treasureChest.userData.canInteract = true;
+            }
+        } else {
+            this.hideTreasurePrompt();
+            if (this.treasureChest) {
+                this.treasureChest.userData.canInteract = false;
+            }
+        }
+    }
+    
+    showTreasurePrompt() {
+        if (document.getElementById('treasure-prompt')) return;
+        
+        const promptDiv = document.createElement('div');
+        promptDiv.id = 'treasure-prompt';
+        promptDiv.style.cssText = `
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 215, 0, 0.2);
+            border: 2px solid #FFD700;
+            border-radius: 16px;
+            padding: 20px;
+            color: #FFD700;
+            font-size: 18px;
+            font-weight: bold;
+            z-index: 1000;
+            text-align: center;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 0 30px rgba(255, 215, 0, 0.3);
+            animation: treasurePulse 2s infinite;
+        `;
+        promptDiv.innerHTML = `
+            💰 SECRET TREASURE DISCOVERED! 💰<br>
+            <span style="font-size: 14px; font-weight: normal;">Click the chest to claim your prize!</span>
+        `;
+        
+        document.body.appendChild(promptDiv);
+        
+        // Add CSS animation
+        if (!document.getElementById('treasure-animation-style')) {
+            const style = document.createElement('style');
+            style.id = 'treasure-animation-style';
+            style.textContent = `
+                @keyframes treasurePulse {
+                    0%, 100% { transform: translate(-50%, -50%) scale(1); }
+                    50% { transform: translate(-50%, -50%) scale(1.05); }
+                }
+            `;
+            document.head.appendChild(style);
+        }
+    }
+    
+    hideTreasurePrompt() {
+        const prompt = document.getElementById('treasure-prompt');
+        if (prompt) {
+            document.body.removeChild(prompt);
+        }
+    }
+    
+    openTreasureChest() {
+        if (!this.treasureChest || !this.treasureChest.userData.canInteract) return false;
+        
+        // Award point
+        this.playerScore += 1;
+        this.updateScoreDisplay();
+        
+        // Create treasure opening effect
+        this.createTreasureEffect();
+        
+        // Remove treasure chest
+        this.scene.remove(this.treasureChest);
+        this.treasureChest = null;
+        this.treasurePosition = null;
+        
+        // Hide prompt
+        this.hideTreasurePrompt();
+        
+        // Show victory message
+        this.showTreasureVictory();
+        
+        console.log('💰 Treasure chest opened! Score:', this.playerScore);
+        return true;
+    }
+    
+    createTreasureEffect() {
+        if (!this.treasurePosition) return;
+        
+        // Create golden particle explosion
+        const particles = [];
+        for (let i = 0; i < 20; i++) {
+            const particleGeometry = new THREE.SphereGeometry(0.1, 6, 4);
+            const particleMaterial = new THREE.MeshBasicMaterial({ 
+                color: 0xFFD700,
+                emissive: 0xFFD700,
+                emissiveIntensity: 1
+            });
+            const particle = new THREE.Mesh(particleGeometry, particleMaterial);
+            particle.position.copy(this.treasurePosition);
+            particle.position.y += 1;
+            
+            const velocity = new THREE.Vector3(
+                (Math.random() - 0.5) * 15,
+                Math.random() * 10 + 5,
+                (Math.random() - 0.5) * 15
+            );
+            
+            this.scene.add(particle);
+            particles.push({ mesh: particle, velocity: velocity, life: 3.0 });
+        }
+        
+        // Animate golden particles
+        const animateParticles = () => {
+            particles.forEach((particle, index) => {
+                particle.mesh.position.add(particle.velocity.clone().multiplyScalar(0.02));
+                particle.velocity.multiplyScalar(0.98); // Air resistance
+                particle.velocity.y -= 0.2; // Gravity
+                particle.life -= 0.02;
+                
+                if (particle.life <= 0) {
+                    this.scene.remove(particle.mesh);
+                    particle.mesh.geometry.dispose();
+                    particle.mesh.material.dispose();
+                    particles.splice(index, 1);
+                } else {
+                    particle.mesh.material.opacity = particle.life / 3.0;
+                    particle.mesh.material.emissiveIntensity = particle.life;
+                }
+            });
+            
+            if (particles.length > 0) {
+                requestAnimationFrame(animateParticles);
+            }
+        };
+        animateParticles();
+    }
+    
+    showTreasureVictory() {
+        const victoryDiv = document.createElement('div');
+        victoryDiv.style.cssText = `
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 215, 0, 0.3);
+            border: 3px solid #FFD700;
+            border-radius: 20px;
+            padding: 30px;
+            color: #FFD700;
+            font-size: 24px;
+            font-weight: bold;
+            z-index: 1000;
+            text-align: center;
+            backdrop-filter: blur(15px);
+            box-shadow: 0 0 50px rgba(255, 215, 0, 0.5);
+        `;
+        victoryDiv.innerHTML = `
+            🏆 TREASURE FOUND! 🏆<br>
+            <span style="font-size: 18px;">+1 Point Earned!</span><br>
+            <span style="font-size: 14px; font-weight: normal; opacity: 0.8;">Score: ${this.playerScore}</span><br>
+            <span style="font-size: 12px; font-weight: normal; margin-top: 10px; display: block;">You are brave to venture into the dangerous realm!</span>
+        `;
+        
+        document.body.appendChild(victoryDiv);
+        
+        setTimeout(() => {
+            if (document.body.contains(victoryDiv)) {
+                document.body.removeChild(victoryDiv);
+            }
+        }, 4000);
+    }
+    
+    updateScoreDisplay() {
+        const scoreElement = document.getElementById('treasure-score');
+        if (scoreElement) {
+            scoreElement.textContent = this.playerScore;
+            
+            // Flash the score when it updates
+            scoreElement.style.color = '#FFD700';
+            scoreElement.style.textShadow = '0 0 10px #FFD700';
+            
+            setTimeout(() => {
+                scoreElement.style.color = '#FFD700';
+                scoreElement.style.textShadow = 'none';
+            }, 1000);
+        }
+    }
+    
     spawnGhosts() {
         const numGhosts = 5 + Math.floor(Math.random() * 5); // 5-10 ghosts
         
@@ -417,78 +751,86 @@ export class RoguelikeWorld {
         if (playerPosition) {
             this.checkTreasureInteraction(playerPosition);
         }
+        
+        // Animate treasure chest glow
+        if (this.treasureChest && this.treasureChest.userData.glowAnimation) {
+            this.treasureChest.userData.glowAnimation();
+        }
     }
     
-    updateMagicMissiles(deltaTime) {
-        this.magicMissiles.forEach((missile, index) => {
-            // Move missile forward
-            missile.mesh.position.addScaledVector(missile.direction, missile.speed * deltaTime * 60);
+    updateTomatoes(deltaTime) {
+        this.tomatoes.forEach((tomato, index) => {
+            // Apply physics to tomato
+            tomato.velocity.y -= 15 * deltaTime; // Gravity
+            tomato.mesh.position.add(tomato.velocity.clone().multiplyScalar(deltaTime));
             
-            // Remove missiles that have traveled too far
-            if (missile.mesh.position.distanceTo(missile.startPosition) > missile.range) {
-                this.removeMagicMissile(index);
+            // Rotate tomato as it flies
+            tomato.mesh.rotation.x += 0.2;
+            tomato.mesh.rotation.z += 0.15;
+            
+            // Remove tomatoes that have traveled too far or hit ground
+            if (tomato.mesh.position.y < 0 || tomato.mesh.position.distanceTo(tomato.startPosition) > tomato.range) {
+                this.removeTomato(index);
             }
         });
     }
     
-    checkMissileCollisions() {
-        this.magicMissiles.forEach((missile, missileIndex) => {
+    checkTomatoCollisions() {
+        this.tomatoes.forEach((tomato, tomatoIndex) => {
             this.ghosts.forEach((ghost, ghostIndex) => {
-                const distance = missile.mesh.position.distanceTo(ghost.mesh.position);
-                if (distance < 1.0) {
+                const distance = tomato.mesh.position.distanceTo(ghost.mesh.position);
+                if (distance < 1.5) {
                     // Hit!
-                    this.createHitEffect(missile.mesh.position);
-                    this.removeMagicMissile(missileIndex);
+                    this.createTomatoHitEffect(tomato.mesh.position);
+                    this.removeTomato(tomatoIndex);
                     
                     // Damage ghost
                     ghost.health -= 1;
                     if (ghost.health <= 0) {
                         this.createGhostDeathEffect(ghost.mesh.position);
-                        console.log('👻 Ghost destroyed!');
+                        console.log('👻 Ghost destroyed by tomato!');
+                    } else {
+                        console.log('👻 Ghost hit by tomato!');
                     }
                 }
             });
         });
     }
     
-    fireMagicMissile(origin, direction) {
+    fireTomato(origin, direction, powerMultiplier = 1) {
         const now = Date.now();
-        if (now - this.lastMissileTime < this.missileCooldown) return false;
+        if (now - this.lastTomatoTime < this.tomatoCooldown) return false;
         
-        // Create magic missile
-        const missileGeometry = new THREE.SphereGeometry(0.2, 8, 6);
-        const missileMaterial = new THREE.MeshBasicMaterial({ 
-            color: 0x00ffff,
-            emissive: 0x0088ff,
-            emissiveIntensity: 0.8
+        // Create tomato projectile
+        const tomatoGeometry = new THREE.SphereGeometry(0.15, 8, 6);
+        const tomatoMaterial = new THREE.MeshLambertMaterial({ 
+            color: 0xff4444,
+            emissive: 0x441111,
+            emissiveIntensity: 0.2
         });
-        const missile = new THREE.Mesh(missileGeometry, missileMaterial);
-        missile.position.copy(origin);
+        const tomato = new THREE.Mesh(tomatoGeometry, tomatoMaterial);
+        tomato.position.copy(origin);
         
-        // Add glowing trail effect
-        const trailGeometry = new THREE.ConeGeometry(0.1, 0.8, 6);
-        const trailMaterial = new THREE.MeshBasicMaterial({ 
-            color: 0x0066ff,
-            transparent: true,
-            opacity: 0.6
-        });
-        const trail = new THREE.Mesh(trailGeometry, trailMaterial);
-        trail.position.set(0, 0, -0.4);
-        trail.rotation.x = Math.PI / 2;
-        missile.add(trail);
+        // Add green stem
+        const stemGeometry = new THREE.CylinderGeometry(0.02, 0.03, 0.1, 6);
+        const stemMaterial = new THREE.MeshLambertMaterial({ color: 0x228B22 });
+        const stem = new THREE.Mesh(stemGeometry, stemMaterial);
+        stem.position.set(0, 0.12, 0);
+        tomato.add(stem);
         
-        this.scene.add(missile);
+        this.scene.add(tomato);
         
-        this.magicMissiles.push({
-            mesh: missile,
+        this.tomatoes.push({
+            mesh: tomato,
             direction: direction.clone().normalize(),
-            speed: 25,
-            range: 30,
-            startPosition: origin.clone()
+            speed: 20 * powerMultiplier,
+            range: 25 * powerMultiplier,
+            startPosition: origin.clone(),
+            velocity: direction.clone().multiplyScalar(20 * powerMultiplier)
         });
         
-        this.lastMissileTime = now;
-        console.log('🔮 Magic missile fired!');
+        this.lastTomatoTime = now;
+        console.log(`🍅 Tomato fired at ghosts with ${(powerMultiplier * 100).toFixed(0)}% power!`);
         return true;
     }
     
@@ -580,15 +922,60 @@ export class RoguelikeWorld {
         animateDeathParticles();
     }
     
-    removeMagicMissile(index) {
-        if (this.magicMissiles[index]) {
-            this.scene.remove(this.magicMissiles[index].mesh);
-            this.magicMissiles[index].mesh.traverse(child => {
+    removeTomato(index) {
+        if (this.tomatoes[index]) {
+            this.scene.remove(this.tomatoes[index].mesh);
+            this.tomatoes[index].mesh.traverse(child => {
                 if (child.geometry) child.geometry.dispose();
                 if (child.material) child.material.dispose();
             });
-            this.magicMissiles.splice(index, 1);
+            this.tomatoes.splice(index, 1);
         }
+    }
+    
+    createTomatoHitEffect(position) {
+        // Create tomato splat effect when hitting ghosts
+        const particles = [];
+        for (let i = 0; i < 8; i++) {
+            const particleGeometry = new THREE.SphereGeometry(0.05, 4, 3);
+            const particleMaterial = new THREE.MeshBasicMaterial({ 
+                color: 0xff4444,
+                emissive: 0xff2222,
+                emissiveIntensity: 0.5
+            });
+            const particle = new THREE.Mesh(particleGeometry, particleMaterial);
+            particle.position.copy(position);
+            
+            const velocity = new THREE.Vector3(
+                (Math.random() - 0.5) * 8,
+                (Math.random() - 0.5) * 8,
+                (Math.random() - 0.5) * 8
+            );
+            
+            this.scene.add(particle);
+            particles.push({ mesh: particle, velocity: velocity, life: 1.0 });
+        }
+        
+        // Animate tomato splat particles
+        const animateParticles = () => {
+            particles.forEach((particle, index) => {
+                particle.mesh.position.add(particle.velocity.clone().multiplyScalar(0.02));
+                particle.velocity.multiplyScalar(0.95); // Friction
+                particle.life -= 0.05;
+                
+                if (particle.life <= 0) {
+                    this.scene.remove(particle.mesh);
+                    particles.splice(index, 1);
+                } else {
+                    particle.mesh.material.opacity = particle.life;
+                }
+            });
+            
+            if (particles.length > 0) {
+                requestAnimationFrame(animateParticles);
+            }
+        };
+        animateParticles();
     }
     
     removeGhost(index) {
@@ -837,9 +1224,33 @@ export class RoguelikeWorld {
             });
         });
         
+        // Clean up treasure chest
+        if (this.treasureChest) {
+            this.scene.remove(this.treasureChest);
+            this.treasureChest.traverse(child => {
+                if (child.geometry) child.geometry.dispose();
+                if (child.material) child.material.dispose();
+            });
+            this.treasureChest = null;
+            this.treasurePosition = null;
+        }
+        
+        // Clean up tomatoes
+        this.tomatoes.forEach(tomato => {
+            this.scene.remove(tomato.mesh);
+            tomato.mesh.traverse(child => {
+                if (child.geometry) child.geometry.dispose();
+                if (child.material) child.material.dispose();
+            });
+        });
+        
         this.walls = [];
         this.floors = [];
         this.ghosts = [];
+        this.tomatoes = [];
+        
+        // Hide any prompts
+        this.hideTreasurePrompt();
     }
     
     checkExitCollision(playerPosition) {
