@@ -44,7 +44,7 @@ class Room {
         this.id = id;
         this.users = new Map();
         this.host = null;
-        this.seats = new Array(360).fill(null); // 15 rows × 24 seats
+        this.seats = new Array(160).fill(null); // 10 rows × 16 seats
         this.screenSharing = false;
     }
     

@@ -282,28 +282,29 @@ export class Theatre {
     }
     
     createSeats() {
-        const seatGeometry = new THREE.BoxGeometry(1.2, 1, 1);
+        // 25% larger seats
+        const seatGeometry = new THREE.BoxGeometry(1.5, 1.25, 1.25);
         const seatMaterial = new THREE.MeshLambertMaterial({ color: 0x8b0000 });
-        const backrestGeometry = new THREE.BoxGeometry(1.2, 1.5, 0.2);
+        const backrestGeometry = new THREE.BoxGeometry(1.5, 1.875, 0.25);
         
-        const rows = 15; // More rows for the massive space
-        const seatsPerRow = 24; // More seats per row
-        const seatSpacing = 3; // More spacing
-        const rowSpacing = 3.3;
+        const rows = 10; // Reduced from 15 to 10 rows
+        const seatsPerRow = 16; // Reduced from 24 to 16 seats per row
+        const seatSpacing = 4; // Increased spacing for larger seats
+        const rowSpacing = 4.5; // Increased row spacing
         
         for (let row = 0; row < rows; row++) {
             for (let seatIndex = 0; seatIndex < seatsPerRow; seatIndex++) {
                 const seatGroup = new THREE.Group();
                 
-                // Seat base
+                // Larger seat base
                 const seat = new THREE.Mesh(seatGeometry, seatMaterial);
-                seat.position.y = 0.5;
+                seat.position.y = 0.625; // Adjusted for larger seat
                 seat.castShadow = true;
                 seatGroup.add(seat);
                 
-                // Seat backrest - positioned to face the screen
+                // Larger seat backrest - positioned to face the screen
                 const backrest = new THREE.Mesh(backrestGeometry, seatMaterial);
-                backrest.position.set(0, 1.25, 0.4); // Moved to back of seat
+                backrest.position.set(0, 1.5625, 0.5); // Adjusted for larger seat
                 backrest.castShadow = true;
                 seatGroup.add(backrest);
                 
