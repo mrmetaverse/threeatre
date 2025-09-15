@@ -28,7 +28,7 @@ class Room {
         this.id = id;
         this.users = new Map();
         this.host = null;
-        this.seats = new Array(96).fill(null); // 8 rows × 12 seats
+        this.seats = new Array(360).fill(null); // 15 rows × 24 seats
         this.screenSharing = false;
     }
     
@@ -180,11 +180,33 @@ io.on('connection', (socket) => {
                     userId: socket.userId,
                     seatIndex: result.seatIndex
                 });
+                console.log(`User ${socket.userId} assigned to seat ${result.seatIndex} in room ${roomId}`);
             } else {
                 // Notify user that seat request was denied
                 socket.emit('seat-request-denied', {
                     reason: result.reason
                 });
+                console.log(`Seat request denied for user ${socket.userId}: ${result.reason}`);
+            }
+        }
+    });
+    
+    socket.on('leave-seat', (data) => {
+        const { roomId } = data;
+        const room = rooms.get(roomId);
+        
+        if (room && socket.userId) {
+            const user = room.users.get(socket.userId);
+            if (user && user.seatIndex !== null) {
+                // Free the seat
+                room.seats[user.seatIndex] = null;
+                user.seatIndex = null;
+                
+                // Notify all users
+                io.to(roomId).emit('seat-left', {
+                    userId: socket.userId
+                });
+                console.log(`User ${socket.userId} left their seat in room ${roomId}`);
             }
         }
     });

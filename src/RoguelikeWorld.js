@@ -13,6 +13,12 @@ export class RoguelikeWorld {
         this.maze = [];
         this.player = null;
         this.exitPosition = new THREE.Vector3(0, 0, 25); // Back to theatre
+        this.tomatoes = [];
+        this.lastTomatoTime = 0;
+        this.tomatoCooldown = 300; // ms between tomatoes
+        this.treasureChest = null;
+        this.treasurePosition = null;
+        this.playerScore = 0;
         
         this.generateMaze();
     }
@@ -86,6 +92,9 @@ export class RoguelikeWorld {
         
         // Build maze geometry
         this.buildMazeGeometry();
+        
+        // Add warning sign outside theatre
+        this.createWarningSign();
         
         // Spawn ghosts
         this.spawnGhosts();
@@ -163,6 +172,100 @@ export class RoguelikeWorld {
         return texture;
     }
     
+    createWarningSign() {
+        // Create warning sign post
+        const postGeometry = new THREE.CylinderGeometry(0.2, 0.2, 4, 8);
+        const postMaterial = new THREE.MeshLambertMaterial({ color: 0x8B4513 });
+        const post = new THREE.Mesh(postGeometry, postMaterial);
+        post.position.set(0, 2, 28); // Just outside theatre exit
+        post.castShadow = true;
+        this.scene.add(post);
+        this.walls.push(post);
+        
+        // Create warning sign board
+        const signGeometry = new THREE.PlaneGeometry(6, 3);
+        const signMaterial = new THREE.MeshLambertMaterial({ 
+            color: 0x8B0000,
+            side: THREE.DoubleSide
+        });
+        const sign = new THREE.Mesh(signGeometry, signMaterial);
+        sign.position.set(0, 4, 28);
+        this.scene.add(sign);
+        this.walls.push(sign);
+        
+        // Add warning text (using simple geometry)
+        this.createWarningText(sign);
+        
+        // Add skulls around the sign
+        for (let i = 0; i < 4; i++) {
+            const angle = (i / 4) * Math.PI * 2;
+            const skullGeometry = new THREE.SphereGeometry(0.3, 8, 6);
+            const skullMaterial = new THREE.MeshLambertMaterial({ color: 0xccccaa });
+            const skull = new THREE.Mesh(skullGeometry, skullMaterial);
+            skull.position.set(
+                Math.cos(angle) * 2,
+                1 + Math.sin(i) * 0.5,
+                28 + Math.sin(angle) * 1
+            );
+            skull.castShadow = true;
+            this.scene.add(skull);
+            this.walls.push(skull);
+        }
+        
+        // Add ominous red lighting to sign
+        const signLight = new THREE.PointLight(0xff0000, 0.8, 8);
+        signLight.position.set(0, 4, 27);
+        this.scene.add(signLight);
+        
+        // Make sign light pulse
+        setInterval(() => {
+            signLight.intensity = 0.6 + Math.sin(Date.now() * 0.008) * 0.4;
+        }, 50);
+    }
+    
+    createWarningText(signMesh) {
+        // Create "BEWARE" text using simple geometry
+        const textMaterial = new THREE.MeshBasicMaterial({ 
+            color: 0xffff00,
+            emissive: 0xffaa00,
+            emissiveIntensity: 0.3
+        });
+        
+        // Create letters using box geometry (simple but effective)
+        const letterHeight = 0.8;
+        const letterWidth = 0.4;
+        const letterDepth = 0.1;
+        
+        // "BEWARE" - positioned on the sign
+        const letters = [
+            // B
+            { x: -2.5, y: 0.3, shapes: [[0, 0], [0, 0.8], [0.3, 0.4], [0.3, 0]] },
+            // E  
+            { x: -1.8, y: 0.3, shapes: [[0, 0], [0, 0.8], [0.3, 0.8], [0.3, 0.4], [0.3, 0]] },
+            // W
+            { x: -1.1, y: 0.3, shapes: [[0, 0], [0, 0.8], [0.15, 0.4], [0.3, 0.8], [0.3, 0]] },
+            // A
+            { x: -0.4, y: 0.3, shapes: [[0, 0], [0, 0.8], [0.3, 0.8], [0.3, 0], [0.15, 0.4]] },
+            // R
+            { x: 0.3, y: 0.3, shapes: [[0, 0], [0, 0.8], [0.3, 0.8], [0.3, 0.4], [0, 0.4]] },
+            // E
+            { x: 1.0, y: 0.3, shapes: [[0, 0], [0, 0.8], [0.3, 0.8], [0.3, 0.4], [0.3, 0]] }
+        ];
+        
+        letters.forEach(letter => {
+            const letterGeometry = new THREE.BoxGeometry(letterWidth, letterHeight, letterDepth);
+            const letterMesh = new THREE.Mesh(letterGeometry, textMaterial);
+            letterMesh.position.set(letter.x, letter.y, 0.1);
+            signMesh.add(letterMesh);
+        });
+        
+        // "OF GHOSTS" text below
+        const subTextGeometry = new THREE.BoxGeometry(4, 0.4, letterDepth);
+        const subText = new THREE.Mesh(subTextGeometry, textMaterial);
+        subText.position.set(0, -0.5, 0.1);
+        signMesh.add(subText);
+    }
+    
     spawnGhosts() {
         const numGhosts = 5 + Math.floor(Math.random() * 5); // 5-10 ghosts
         
@@ -180,7 +283,8 @@ export class RoguelikeWorld {
                     speed: 0.02 + Math.random() * 0.02,
                     lastPlayerDistance: Infinity,
                     aggroRange: 8,
-                    killRange: 1.5
+                    killRange: 1.5,
+                    health: 2 + Math.floor(Math.random() * 3) // 2-4 health
                 });
             }
         }
@@ -189,35 +293,47 @@ export class RoguelikeWorld {
     createGhost() {
         const ghostGroup = new THREE.Group();
         
-        // Ghost body - translucent and spooky
-        const bodyGeometry = new THREE.ConeGeometry(0.8, 2.5, 8);
-        const bodyMaterial = new THREE.MeshLambertMaterial({ 
-            color: 0xcccccc,
+        // Ominous glowing orb - much more visible and threatening
+        const orbGeometry = new THREE.SphereGeometry(1.2, 16, 12);
+        const orbMaterial = new THREE.MeshBasicMaterial({ 
+            color: 0xffffff,
+            emissive: 0xaaaaff,
+            emissiveIntensity: 0.8,
             transparent: true,
-            opacity: 0.7
+            opacity: 0.9
         });
-        const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-        body.position.y = 1.25;
-        ghostGroup.add(body);
+        const orb = new THREE.Mesh(orbGeometry, orbMaterial);
+        orb.position.y = 2;
+        ghostGroup.add(orb);
         
-        // Ghost eyes - glowing red
-        const eyeGeometry = new THREE.SphereGeometry(0.1, 6, 4);
-        const eyeMaterial = new THREE.MeshBasicMaterial({ 
-            color: 0xff0000,
-            emissive: 0xff0000,
-            emissiveIntensity: 0.5
+        // Inner core - brighter center
+        const coreGeometry = new THREE.SphereGeometry(0.6, 12, 8);
+        const coreMaterial = new THREE.MeshBasicMaterial({ 
+            color: 0xffffff,
+            emissive: 0xffffff,
+            emissiveIntensity: 1.2,
+            transparent: true,
+            opacity: 0.6
         });
+        const core = new THREE.Mesh(coreGeometry, coreMaterial);
+        core.position.y = 2;
+        ghostGroup.add(core);
         
-        const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
-        leftEye.position.set(-0.3, 2, 0.3);
-        ghostGroup.add(leftEye);
+        // Glowing aura around the ghost
+        const auraGeometry = new THREE.SphereGeometry(2, 12, 8);
+        const auraMaterial = new THREE.MeshBasicMaterial({ 
+            color: 0x8888ff,
+            transparent: true,
+            opacity: 0.1,
+            side: THREE.BackSide
+        });
+        const aura = new THREE.Mesh(auraGeometry, auraMaterial);
+        aura.position.y = 2;
+        ghostGroup.add(aura);
         
-        const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
-        rightEye.position.set(0.3, 2, 0.3);
-        ghostGroup.add(rightEye);
-        
-        // Add floating animation
+        // Add floating animation data
         ghostGroup.userData.floatOffset = Math.random() * Math.PI * 2;
+        ghostGroup.userData.pulseOffset = Math.random() * Math.PI * 2;
         
         return ghostGroup;
     }
@@ -283,9 +399,207 @@ export class RoguelikeWorld {
         if (!this.isActive) return;
         
         // Update ghosts
-        this.ghosts.forEach(ghost => {
+        this.ghosts.forEach((ghost, index) => {
+            if (ghost.health <= 0) {
+                this.removeGhost(index);
+                return;
+            }
             this.updateGhost(ghost, deltaTime, playerPosition);
         });
+        
+        // Update tomatoes
+        this.updateTomatoes(deltaTime);
+        
+        // Check tomato-ghost collisions
+        this.checkTomatoCollisions();
+        
+        // Check treasure chest interaction
+        if (playerPosition) {
+            this.checkTreasureInteraction(playerPosition);
+        }
+    }
+    
+    updateMagicMissiles(deltaTime) {
+        this.magicMissiles.forEach((missile, index) => {
+            // Move missile forward
+            missile.mesh.position.addScaledVector(missile.direction, missile.speed * deltaTime * 60);
+            
+            // Remove missiles that have traveled too far
+            if (missile.mesh.position.distanceTo(missile.startPosition) > missile.range) {
+                this.removeMagicMissile(index);
+            }
+        });
+    }
+    
+    checkMissileCollisions() {
+        this.magicMissiles.forEach((missile, missileIndex) => {
+            this.ghosts.forEach((ghost, ghostIndex) => {
+                const distance = missile.mesh.position.distanceTo(ghost.mesh.position);
+                if (distance < 1.0) {
+                    // Hit!
+                    this.createHitEffect(missile.mesh.position);
+                    this.removeMagicMissile(missileIndex);
+                    
+                    // Damage ghost
+                    ghost.health -= 1;
+                    if (ghost.health <= 0) {
+                        this.createGhostDeathEffect(ghost.mesh.position);
+                        console.log('👻 Ghost destroyed!');
+                    }
+                }
+            });
+        });
+    }
+    
+    fireMagicMissile(origin, direction) {
+        const now = Date.now();
+        if (now - this.lastMissileTime < this.missileCooldown) return false;
+        
+        // Create magic missile
+        const missileGeometry = new THREE.SphereGeometry(0.2, 8, 6);
+        const missileMaterial = new THREE.MeshBasicMaterial({ 
+            color: 0x00ffff,
+            emissive: 0x0088ff,
+            emissiveIntensity: 0.8
+        });
+        const missile = new THREE.Mesh(missileGeometry, missileMaterial);
+        missile.position.copy(origin);
+        
+        // Add glowing trail effect
+        const trailGeometry = new THREE.ConeGeometry(0.1, 0.8, 6);
+        const trailMaterial = new THREE.MeshBasicMaterial({ 
+            color: 0x0066ff,
+            transparent: true,
+            opacity: 0.6
+        });
+        const trail = new THREE.Mesh(trailGeometry, trailMaterial);
+        trail.position.set(0, 0, -0.4);
+        trail.rotation.x = Math.PI / 2;
+        missile.add(trail);
+        
+        this.scene.add(missile);
+        
+        this.magicMissiles.push({
+            mesh: missile,
+            direction: direction.clone().normalize(),
+            speed: 25,
+            range: 30,
+            startPosition: origin.clone()
+        });
+        
+        this.lastMissileTime = now;
+        console.log('🔮 Magic missile fired!');
+        return true;
+    }
+    
+    createHitEffect(position) {
+        // Create explosion effect
+        const particles = [];
+        for (let i = 0; i < 10; i++) {
+            const particleGeometry = new THREE.SphereGeometry(0.05, 4, 3);
+            const particleMaterial = new THREE.MeshBasicMaterial({ 
+                color: 0xffff00,
+                emissive: 0xffaa00,
+                emissiveIntensity: 1
+            });
+            const particle = new THREE.Mesh(particleGeometry, particleMaterial);
+            particle.position.copy(position);
+            
+            const velocity = new THREE.Vector3(
+                (Math.random() - 0.5) * 10,
+                (Math.random() - 0.5) * 10,
+                (Math.random() - 0.5) * 10
+            );
+            
+            this.scene.add(particle);
+            particles.push({ mesh: particle, velocity: velocity, life: 1.0 });
+        }
+        
+        // Animate particles
+        const animateParticles = () => {
+            particles.forEach((particle, index) => {
+                particle.mesh.position.add(particle.velocity.clone().multiplyScalar(0.02));
+                particle.velocity.multiplyScalar(0.95); // Friction
+                particle.life -= 0.05;
+                
+                if (particle.life <= 0) {
+                    this.scene.remove(particle.mesh);
+                    particles.splice(index, 1);
+                } else {
+                    particle.mesh.material.opacity = particle.life;
+                }
+            });
+            
+            if (particles.length > 0) {
+                requestAnimationFrame(animateParticles);
+            }
+        };
+        animateParticles();
+    }
+    
+    createGhostDeathEffect(position) {
+        // Create ghost death effect - white particles floating up
+        const particles = [];
+        for (let i = 0; i < 15; i++) {
+            const particleGeometry = new THREE.SphereGeometry(0.1, 6, 4);
+            const particleMaterial = new THREE.MeshBasicMaterial({ 
+                color: 0xffffff,
+                transparent: true,
+                opacity: 0.8
+            });
+            const particle = new THREE.Mesh(particleGeometry, particleMaterial);
+            particle.position.copy(position);
+            particle.position.add(new THREE.Vector3(
+                (Math.random() - 0.5) * 2,
+                Math.random() * 2,
+                (Math.random() - 0.5) * 2
+            ));
+            
+            this.scene.add(particle);
+            particles.push({ mesh: particle, life: 2.0 });
+        }
+        
+        // Animate death particles floating upward
+        const animateDeathParticles = () => {
+            particles.forEach((particle, index) => {
+                particle.mesh.position.y += 0.05;
+                particle.life -= 0.02;
+                
+                if (particle.life <= 0) {
+                    this.scene.remove(particle.mesh);
+                    particles.splice(index, 1);
+                } else {
+                    particle.mesh.material.opacity = particle.life * 0.4;
+                }
+            });
+            
+            if (particles.length > 0) {
+                requestAnimationFrame(animateDeathParticles);
+            }
+        };
+        animateDeathParticles();
+    }
+    
+    removeMagicMissile(index) {
+        if (this.magicMissiles[index]) {
+            this.scene.remove(this.magicMissiles[index].mesh);
+            this.magicMissiles[index].mesh.traverse(child => {
+                if (child.geometry) child.geometry.dispose();
+                if (child.material) child.material.dispose();
+            });
+            this.magicMissiles.splice(index, 1);
+        }
+    }
+    
+    removeGhost(index) {
+        if (this.ghosts[index]) {
+            this.scene.remove(this.ghosts[index].mesh);
+            this.ghosts[index].mesh.traverse(child => {
+                if (child.geometry) child.geometry.dispose();
+                if (child.material) child.material.dispose();
+            });
+            this.ghosts.splice(index, 1);
+        }
     }
     
     updateGhost(ghost, deltaTime, playerPosition) {

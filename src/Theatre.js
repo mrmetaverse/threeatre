@@ -30,36 +30,36 @@ export class Theatre {
     }
     
     createTheatreGeometry() {
-        // Create main floor
-        const mainFloorGeometry = new THREE.PlaneGeometry(30, 20);
+        // Create massive main floor - 3x larger
+        const mainFloorGeometry = new THREE.PlaneGeometry(90, 60);
         const floorMaterial = new THREE.MeshLambertMaterial({ 
             color: 0x2a2a2a,
             side: THREE.DoubleSide 
         });
         const mainFloor = new THREE.Mesh(mainFloorGeometry, floorMaterial);
         mainFloor.rotation.x = -Math.PI / 2;
-        mainFloor.position.z = 10;
+        mainFloor.position.z = 30;
         mainFloor.receiveShadow = true;
         this.scene.add(mainFloor);
         
-        // Create recessed seating floor (lower level)
-        const seatingFloorGeometry = new THREE.PlaneGeometry(28, 18);
+        // Create massive recessed seating floor (lower level)
+        const seatingFloorGeometry = new THREE.PlaneGeometry(84, 54);
         const seatingFloorMaterial = new THREE.MeshLambertMaterial({ 
             color: 0x1a1a1a,
             side: THREE.DoubleSide 
         });
         const seatingFloor = new THREE.Mesh(seatingFloorGeometry, seatingFloorMaterial);
         seatingFloor.rotation.x = -Math.PI / 2;
-        seatingFloor.position.set(0, -0.5, -5);
+        seatingFloor.position.set(0, -1.5, -15);
         seatingFloor.receiveShadow = true;
         this.scene.add(seatingFloor);
         
-        // Create steps between levels
-        for (let i = 0; i < 3; i++) {
-            const stepGeometry = new THREE.BoxGeometry(28, 0.2, 1);
+        // Create grand steps between levels
+        for (let i = 0; i < 8; i++) {
+            const stepGeometry = new THREE.BoxGeometry(84, 0.3, 3);
             const stepMaterial = new THREE.MeshLambertMaterial({ color: 0x333333 });
             const step = new THREE.Mesh(stepGeometry, stepMaterial);
-            step.position.set(0, -0.1 - (i * 0.15), 1 - (i * 1));
+            step.position.set(0, -0.2 - (i * 0.2), 3 - (i * 3));
             step.receiveShadow = true;
             step.castShadow = true;
             this.scene.add(step);
@@ -71,11 +71,11 @@ export class Theatre {
         // Create megalithic vaulted ceiling - much higher like ancient pyramid chambers
         this.createMegalithicCeiling();
         
-        // Create elevated stage
-        const stageGeometry = new THREE.BoxGeometry(30, 1.2, 6);
+        // Create massive elevated stage
+        const stageGeometry = new THREE.BoxGeometry(90, 3.6, 18);
         const stageMaterial = new THREE.MeshLambertMaterial({ color: 0x4a4a4a });
         this.stage = new THREE.Mesh(stageGeometry, stageMaterial);
-        this.stage.position.set(0, 0.6, -17);
+        this.stage.position.set(0, 1.8, -51);
         this.stage.castShadow = true;
         this.stage.receiveShadow = true;
         this.scene.add(this.stage);
@@ -88,26 +88,26 @@ export class Theatre {
             roughness: 0.9
         });
         
-        // Back wall - massive stone blocks
-        const backWallGeometry = new THREE.BoxGeometry(32, 20, 2);
+        // Back wall - colossal stone blocks
+        const backWallGeometry = new THREE.BoxGeometry(96, 60, 6);
         const backWall = new THREE.Mesh(backWallGeometry, stoneMaterial);
-        backWall.position.set(0, 10, -21);
+        backWall.position.set(0, 30, -63);
         backWall.receiveShadow = true;
         this.scene.add(backWall);
         this.walls.push(backWall);
         
         // Left wall - towering megalithic stones
-        const leftWallGeometry = new THREE.BoxGeometry(2, 20, 44);
+        const leftWallGeometry = new THREE.BoxGeometry(6, 60, 132);
         const leftWall = new THREE.Mesh(leftWallGeometry, stoneMaterial);
-        leftWall.position.set(-16, 10, 0);
+        leftWall.position.set(-48, 30, 0);
         leftWall.receiveShadow = true;
         this.scene.add(leftWall);
         this.walls.push(leftWall);
         
         // Right wall - towering megalithic stones
-        const rightWallGeometry = new THREE.BoxGeometry(2, 20, 44);
+        const rightWallGeometry = new THREE.BoxGeometry(6, 60, 132);
         const rightWall = new THREE.Mesh(rightWallGeometry, stoneMaterial);
-        rightWall.position.set(16, 10, 0);
+        rightWall.position.set(48, 30, 0);
         rightWall.receiveShadow = true;
         this.scene.add(rightWall);
         this.walls.push(rightWall);
@@ -120,46 +120,46 @@ export class Theatre {
     }
     
     createFrontWallWithExit(stoneMaterial) {
-        // Left part of front wall
-        const frontLeftGeometry = new THREE.BoxGeometry(10, 20, 2);
+        // Left part of massive front wall
+        const frontLeftGeometry = new THREE.BoxGeometry(30, 60, 6);
         const frontLeft = new THREE.Mesh(frontLeftGeometry, stoneMaterial);
-        frontLeft.position.set(-11, 10, 21);
+        frontLeft.position.set(-33, 30, 63);
         frontLeft.receiveShadow = true;
         this.scene.add(frontLeft);
         this.walls.push(frontLeft);
         
-        // Right part of front wall
-        const frontRightGeometry = new THREE.BoxGeometry(10, 20, 2);
+        // Right part of massive front wall
+        const frontRightGeometry = new THREE.BoxGeometry(30, 60, 6);
         const frontRight = new THREE.Mesh(frontRightGeometry, stoneMaterial);
-        frontRight.position.set(11, 10, 21);
+        frontRight.position.set(33, 30, 63);
         frontRight.receiveShadow = true;
         this.scene.add(frontRight);
         this.walls.push(frontRight);
         
-        // Top part above exit
-        const frontTopGeometry = new THREE.BoxGeometry(12, 8, 2);
+        // Top part above exit - grand archway
+        const frontTopGeometry = new THREE.BoxGeometry(36, 24, 6);
         const frontTop = new THREE.Mesh(frontTopGeometry, stoneMaterial);
-        frontTop.position.set(0, 16, 21);
+        frontTop.position.set(0, 48, 63);
         frontTop.receiveShadow = true;
         this.scene.add(frontTop);
         this.walls.push(frontTop);
         
-        // Exit door frame - ominous dark opening
-        const doorFrameGeometry = new THREE.BoxGeometry(8.5, 12.5, 0.5);
+        // Massive exit door frame - ominous dark opening
+        const doorFrameGeometry = new THREE.BoxGeometry(25.5, 37.5, 1.5);
         const doorFrameMaterial = new THREE.MeshLambertMaterial({ color: 0x2a1f15 });
         const doorFrame = new THREE.Mesh(doorFrameGeometry, doorFrameMaterial);
-        doorFrame.position.set(0, 6, 20.75);
+        doorFrame.position.set(0, 18, 62.25);
         this.scene.add(doorFrame);
         
-        // Dark exit portal
-        const exitGeometry = new THREE.PlaneGeometry(7, 11);
+        // Dark exit portal - imposing gateway
+        const exitGeometry = new THREE.PlaneGeometry(21, 33);
         const exitMaterial = new THREE.MeshBasicMaterial({ 
             color: 0x000000,
             transparent: true,
             opacity: 0.9
         });
         this.exitPortal = new THREE.Mesh(exitGeometry, exitMaterial);
-        this.exitPortal.position.set(0, 6, 20.8);
+        this.exitPortal.position.set(0, 18, 62.4);
         this.exitPortal.name = 'exit-portal';
         this.scene.add(this.exitPortal);
         
@@ -168,47 +168,50 @@ export class Theatre {
     }
     
     createExitWarning() {
-        // Create warning text above exit
-        const warningGeometry = new THREE.PlaneGeometry(6, 1);
+        // Create massive warning text above exit
+        const warningGeometry = new THREE.PlaneGeometry(18, 3);
         const warningMaterial = new THREE.MeshBasicMaterial({ 
             color: 0xff0000,
             transparent: true,
             opacity: 0.8
         });
         const warning = new THREE.Mesh(warningGeometry, warningMaterial);
-        warning.position.set(0, 13, 20.5);
+        warning.position.set(0, 39, 61.5);
         this.scene.add(warning);
         
-        // Add skull decorations
-        for (let i = 0; i < 3; i++) {
-            const skullGeometry = new THREE.SphereGeometry(0.3, 8, 6);
+        // Add larger skull decorations
+        for (let i = 0; i < 5; i++) {
+            const skullGeometry = new THREE.SphereGeometry(0.9, 8, 6);
             const skullMaterial = new THREE.MeshLambertMaterial({ color: 0xccccaa });
             const skull = new THREE.Mesh(skullGeometry, skullMaterial);
-            skull.position.set((i - 1) * 2, 13.5, 20.3);
+            skull.position.set((i - 2) * 6, 40.5, 60.9);
+            skull.castShadow = true;
             this.scene.add(skull);
         }
     }
     
     createMegalithicPillars(stoneMaterial) {
-        // Massive stone pillars supporting the ceiling
+        // Colossal stone pillars supporting the massive ceiling (no middle pillars)
         const pillarPositions = [
-            [-12, 0, -10], [12, 0, -10],
-            [-12, 0, 0], [12, 0, 0],
-            [-12, 0, 10], [12, 0, 10]
+            [-36, 0, -30], [36, 0, -30],
+            [-36, 0, -15], [36, 0, -15],
+            [-36, 0, 0], [36, 0, 0],
+            [-36, 0, 15], [36, 0, 15],
+            [-36, 0, 30], [36, 0, 30]
         ];
         
         pillarPositions.forEach(pos => {
-            const pillarGeometry = new THREE.CylinderGeometry(1.5, 2, 18, 8);
+            const pillarGeometry = new THREE.CylinderGeometry(1.2, 1.8, 54, 12);
             const pillar = new THREE.Mesh(pillarGeometry, stoneMaterial);
-            pillar.position.set(pos[0], 9, pos[1]);
+            pillar.position.set(pos[0], 27, pos[1]);
             pillar.castShadow = true;
             pillar.receiveShadow = true;
             this.scene.add(pillar);
             
-            // Add capital on top
-            const capitalGeometry = new THREE.CylinderGeometry(2.2, 1.8, 1, 8);
+            // Add elegant capital on top
+            const capitalGeometry = new THREE.CylinderGeometry(2.4, 1.8, 3, 12);
             const capital = new THREE.Mesh(capitalGeometry, stoneMaterial);
-            capital.position.set(pos[0], 18.5, pos[1]);
+            capital.position.set(pos[0], 55.5, pos[1]);
             capital.castShadow = true;
             this.scene.add(capital);
         });
@@ -220,9 +223,9 @@ export class Theatre {
             side: THREE.DoubleSide 
         });
         
-        // Create vaulted ceiling sections - pyramid chamber style
-        const ceilingHeight = 25;
-        const segments = 8;
+        // Create massive vaulted ceiling sections - pyramid chamber style
+        const ceilingHeight = 75; // Much higher ceiling
+        const segments = 12;
         
         for (let i = 0; i < segments; i++) {
             const angle = (i / segments) * Math.PI * 2;
@@ -233,8 +236,8 @@ export class Theatre {
             const vertices = new Float32Array([
                 // Triangle pointing to center peak
                 0, ceilingHeight, 0,  // Peak
-                Math.cos(angle) * 15, 18, Math.sin(angle) * 20,  // Edge 1
-                Math.cos(nextAngle) * 15, 18, Math.sin(nextAngle) * 20   // Edge 2
+                Math.cos(angle) * 45, 54, Math.sin(angle) * 60,  // Edge 1
+                Math.cos(nextAngle) * 45, 54, Math.sin(nextAngle) * 60   // Edge 2
             ]);
             
             geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
@@ -250,14 +253,15 @@ export class Theatre {
     }
     
     addCeilingDecorations() {
-        // Add mysterious glowing runes on the ceiling
+        // Add mysterious glowing runes on the massive ceiling
         const runePositions = [
-            [0, 22, -10], [0, 22, 0], [0, 22, 10],
-            [-8, 20, -5], [8, 20, -5], [-8, 20, 5], [8, 20, 5]
+            [0, 66, -30], [0, 66, 0], [0, 66, 30],
+            [-24, 60, -15], [24, 60, -15], [-24, 60, 15], [24, 60, 15],
+            [-12, 58, -45], [12, 58, -45], [-12, 58, 45], [12, 58, 45]
         ];
         
         runePositions.forEach(pos => {
-            const runeGeometry = new THREE.RingGeometry(0.3, 0.8, 6);
+            const runeGeometry = new THREE.RingGeometry(0.9, 2.4, 8);
             const runeMaterial = new THREE.MeshBasicMaterial({ 
                 color: 0x4444ff,
                 transparent: true,
@@ -281,10 +285,10 @@ export class Theatre {
         const seatMaterial = new THREE.MeshLambertMaterial({ color: 0x8b0000 });
         const backrestGeometry = new THREE.BoxGeometry(1.2, 1.5, 0.2);
         
-        const rows = 8;
-        const seatsPerRow = 12;
-        const seatSpacing = 2;
-        const rowSpacing = 2.2;
+        const rows = 15; // More rows for the massive space
+        const seatsPerRow = 24; // More seats per row
+        const seatSpacing = 3; // More spacing
+        const rowSpacing = 3.3;
         
         for (let row = 0; row < rows; row++) {
             for (let seatIndex = 0; seatIndex < seatsPerRow; seatIndex++) {
@@ -302,10 +306,10 @@ export class Theatre {
                 backrest.castShadow = true;
                 seatGroup.add(backrest);
                 
-                // Position seats in recessed area, facing the screen
+                // Position seats in massive recessed area, facing the screen
                 const x = (seatIndex - seatsPerRow / 2 + 0.5) * seatSpacing;
-                const z = -14 + (row * rowSpacing); // Start from back, face forward
-                const y = -0.5 + (row * 0.25); // In recessed floor with slight elevation
+                const z = -42 + (row * rowSpacing); // Start from back, face forward
+                const y = -1.5 + (row * 0.15); // In recessed floor with slight elevation
                 
                 seatGroup.position.set(x, y, z);
                 
@@ -326,75 +330,88 @@ export class Theatre {
     }
     
     createScreen() {
-        // Create larger screen frame
-        const frameGeometry = new THREE.BoxGeometry(24, 14, 0.5);
+        // Create massive screen frame - 3x larger
+        const frameGeometry = new THREE.BoxGeometry(72, 42, 1.5);
         const frameMaterial = new THREE.MeshLambertMaterial({ color: 0x222222 });
         const frame = new THREE.Mesh(frameGeometry, frameMaterial);
-        frame.position.set(0, 7, -19.5);
+        frame.position.set(0, 21, -58.5);
         frame.castShadow = true;
         this.scene.add(frame);
         
-        // Create larger screen surface
-        const screenGeometry = new THREE.PlaneGeometry(22, 12);
+        // Create massive screen surface - 3x larger
+        const screenGeometry = new THREE.PlaneGeometry(66, 36);
         const screenMaterial = new THREE.MeshBasicMaterial({ 
             color: 0x111111,
             side: THREE.DoubleSide 
         });
         
         this.screen = new THREE.Mesh(screenGeometry, screenMaterial);
-        this.screen.position.set(0, 7, -19);
+        this.screen.position.set(0, 21, -57);
         this.screen.name = 'theatre-screen';
         this.scene.add(this.screen);
     }
     
     createLighting() {
-        // Dramatic screen lighting from above
-        const screenLight = new THREE.SpotLight(0xffffff, 0.8, 40, Math.PI / 8, 0.1);
-        screenLight.position.set(0, 15, -15);
+        // Massive dramatic screen lighting from high above
+        const screenLight = new THREE.SpotLight(0xffffff, 1.2, 120, Math.PI / 10, 0.1);
+        screenLight.position.set(0, 45, -45);
         screenLight.target = this.screen;
         screenLight.castShadow = true;
         this.scene.add(screenLight);
         
-        // Mysterious ambient lighting from the runes
-        const runeLight1 = new THREE.PointLight(0x4444ff, 0.4, 25);
-        runeLight1.position.set(0, 20, -10);
+        // Additional screen lighting for the massive screen
+        const screenLight2 = new THREE.SpotLight(0xffffff, 0.8, 100, Math.PI / 8, 0.2);
+        screenLight2.position.set(-20, 35, -40);
+        screenLight2.target = this.screen;
+        this.scene.add(screenLight2);
+        
+        const screenLight3 = new THREE.SpotLight(0xffffff, 0.8, 100, Math.PI / 8, 0.2);
+        screenLight3.position.set(20, 35, -40);
+        screenLight3.target = this.screen;
+        this.scene.add(screenLight3);
+        
+        // Mysterious ambient lighting from the runes - scaled up
+        const runeLight1 = new THREE.PointLight(0x4444ff, 1.2, 75);
+        runeLight1.position.set(0, 60, -30);
         this.scene.add(runeLight1);
         
-        const runeLight2 = new THREE.PointLight(0x4444ff, 0.3, 20);
-        runeLight2.position.set(-8, 18, 0);
+        const runeLight2 = new THREE.PointLight(0x4444ff, 0.9, 60);
+        runeLight2.position.set(-24, 54, 0);
         this.scene.add(runeLight2);
         
-        const runeLight3 = new THREE.PointLight(0x4444ff, 0.3, 20);
-        runeLight3.position.set(8, 18, 0);
+        const runeLight3 = new THREE.PointLight(0x4444ff, 0.9, 60);
+        runeLight3.position.set(24, 54, 0);
         this.scene.add(runeLight3);
         
-        // Ancient torch lighting on pillars
+        // Ancient torch lighting on massive pillars (no middle torches)
         const torchPositions = [
-            [-12, 15, -10], [12, 15, -10],
-            [-12, 15, 0], [12, 15, 0],
-            [-12, 15, 10], [12, 15, 10]
+            [-36, 45, -30], [36, 45, -30],
+            [-36, 45, -15], [36, 45, -15],
+            [-36, 45, 0], [36, 45, 0],
+            [-36, 45, 15], [36, 45, 15],
+            [-36, 45, 30], [36, 45, 30]
         ];
         
         torchPositions.forEach(pos => {
-            const torchLight = new THREE.PointLight(0xff6600, 0.6, 15);
+            const torchLight = new THREE.PointLight(0xff6600, 1.8, 45);
             torchLight.position.set(pos[0], pos[1], pos[2]);
             torchLight.castShadow = true;
             this.scene.add(torchLight);
             
             // Flickering effect
             setInterval(() => {
-                torchLight.intensity = 0.4 + Math.random() * 0.4;
+                torchLight.intensity = 1.2 + Math.random() * 1.2;
             }, 100 + Math.random() * 200);
         });
         
-        // Ominous exit lighting - red and foreboding
-        const exitLight = new THREE.PointLight(0xff0000, 0.3, 12);
-        exitLight.position.set(0, 8, 18);
+        // Ominous exit lighting - red and foreboding, scaled up
+        const exitLight = new THREE.PointLight(0xff0000, 0.9, 36);
+        exitLight.position.set(0, 24, 54);
         this.scene.add(exitLight);
         
         // Make exit light pulse ominously
         setInterval(() => {
-            exitLight.intensity = 0.2 + Math.sin(Date.now() * 0.005) * 0.2;
+            exitLight.intensity = 0.6 + Math.sin(Date.now() * 0.005) * 0.6;
         }, 50);
     }
     
@@ -504,9 +521,9 @@ export class Theatre {
     }
     
     adjustScreenToContent(aspectRatio) {
-        // Maximum screen dimensions
-        const maxWidth = 22;
-        const maxHeight = 12;
+        // Maximum massive screen dimensions - 3x larger
+        const maxWidth = 66;
+        const maxHeight = 36;
         
         let screenWidth, screenHeight;
         
@@ -520,11 +537,11 @@ export class Theatre {
             screenWidth = maxHeight * aspectRatio;
         }
         
-        // Update screen geometry
+        // Update massive screen geometry
         this.screen.geometry.dispose();
         this.screen.geometry = new THREE.PlaneGeometry(screenWidth, screenHeight);
         
-        console.log('Screen resized to:', screenWidth, 'x', screenHeight, 'for aspect ratio:', aspectRatio);
+        console.log('Massive screen resized to:', screenWidth, 'x', screenHeight, 'for aspect ratio:', aspectRatio);
     }
     
     stopHostStream() {

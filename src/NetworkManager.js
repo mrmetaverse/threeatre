@@ -173,6 +173,14 @@ export class NetworkManager {
         }
     }
     
+    leaveSeat() {
+        if (this.socket && this.isConnected) {
+            this.socket.emit('leave-seat', {
+                roomId: this.roomId
+            });
+        }
+    }
+    
     requestHost() {
         if (this.socket && this.isConnected) {
             this.socket.emit('request-host', {

@@ -1,6 +1,6 @@
 # 🎭 Threeatre
 
-A collaborative WebXR movie theatre experience built with Three.js and Socket.IO. Created by [AltonTech, Inc.](https://altontech.com)
+A collaborative WebXR movie theatre experience built with Three.js and Socket.IO. Created by [mrmetaverse](https://altontech.com)
 
 [![License: Custom](https://img.shields.io/badge/License-Custom-blue.svg)](LICENSE)
 [![Built with Three.js](https://img.shields.io/badge/Built%20with-Three.js-orange.svg)](https://threejs.org/)

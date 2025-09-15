@@ -11,41 +11,45 @@ export class WebXRManager {
     }
     
     async checkSupport() {
+        const xrButton = document.getElementById('xr-button');
+        const xrStatus = document.getElementById('xr-status');
+        
         if ('xr' in navigator) {
             try {
                 const isVRSupported = await navigator.xr.isSessionSupported('immersive-vr');
-                const isARSupported = await navigator.xr.isSessionSupported('immersive-ar');
                 
-                this.isSupported = isVRSupported || isARSupported;
+                this.isSupported = isVRSupported;
                 
-                // Update button states
-                document.getElementById('vr-button').disabled = !isVRSupported;
-                document.getElementById('ar-button').disabled = !isARSupported;
-                
-                if (!isVRSupported) {
-                    document.getElementById('vr-button').textContent = 'VR Not Supported';
+                if (isVRSupported) {
+                    xrButton.disabled = false;
+                    xrStatus.textContent = 'XR Ready - VR headset detected';
+                    xrStatus.style.color = '#4CAF50';
+                } else {
+                    xrButton.disabled = true;
+                    xrButton.textContent = '🥽 XR Not Available';
+                    xrStatus.textContent = 'No VR headset detected. Connect a headset and try again.';
+                    xrStatus.style.color = '#ff9800';
                 }
                 
-                if (!isARSupported) {
-                    document.getElementById('ar-button').textContent = 'AR Not Supported';
-                }
-                
-                console.log('WebXR Support:', { vr: isVRSupported, ar: isARSupported });
+                console.log('WebXR Support:', { vr: isVRSupported });
             } catch (error) {
                 console.error('Error checking WebXR support:', error);
-                this.disableButtons();
+                this.disableButton('Error checking XR support');
             }
         } else {
             console.log('WebXR not available');
-            this.disableButtons();
+            this.disableButton('Browser does not support WebXR');
         }
     }
     
-    disableButtons() {
-        document.getElementById('vr-button').disabled = true;
-        document.getElementById('ar-button').disabled = true;
-        document.getElementById('vr-button').textContent = 'WebXR Not Available';
-        document.getElementById('ar-button').textContent = 'WebXR Not Available';
+    disableButton(reason) {
+        const xrButton = document.getElementById('xr-button');
+        const xrStatus = document.getElementById('xr-status');
+        
+        xrButton.disabled = true;
+        xrButton.textContent = '🥽 XR Not Available';
+        xrStatus.textContent = reason;
+        xrStatus.style.color = '#f44336';
     }
     
     setupButtons() {
@@ -59,6 +63,14 @@ export class WebXRManager {
         this.renderer.xr.addEventListener('sessionend', () => {
             console.log('XR Session ended');
             this.currentSession = null;
+            
+            // Reset button status
+            const xrButton = document.getElementById('xr-button');
+            const xrStatus = document.getElementById('xr-status');
+            xrButton.textContent = '🥽 Enter XR';
+            xrStatus.textContent = 'XR Ready - VR headset detected';
+            xrStatus.style.color = '#4CAF50';
+            
             this.updateUI(false);
         });
     }
@@ -72,9 +84,10 @@ export class WebXRManager {
         }
     }
     
-    async enterVR() {
+    async enterXR() {
         if (!this.isSupported) {
-            alert('WebXR VR is not supported on this device');
+            const xrStatus = document.getElementById('xr-status');
+            alert('XR is not supported: ' + xrStatus.textContent);
             return;
         }
         
@@ -86,35 +99,20 @@ export class WebXRManager {
             const session = await navigator.xr.requestSession('immersive-vr', sessionInit);
             await this.renderer.xr.setSession(session);
             
-            console.log('Entered VR mode');
+            // Update button status
+            const xrButton = document.getElementById('xr-button');
+            const xrStatus = document.getElementById('xr-status');
+            xrButton.textContent = '🥽 Exit XR';
+            xrStatus.textContent = 'XR Session Active';
+            xrStatus.style.color = '#4CAF50';
+            
+            console.log('Entered XR mode');
         } catch (error) {
-            console.error('Error entering VR:', error);
-            alert('Could not enter VR mode. Please check your headset connection.');
+            console.error('Error entering XR:', error);
+            alert('Could not enter XR mode. Make sure your headset is connected and try again.');
         }
     }
     
-    async enterAR() {
-        if (!this.isSupported) {
-            alert('WebXR AR is not supported on this device');
-            return;
-        }
-        
-        try {
-            const sessionInit = {
-                requiredFeatures: ['local'],
-                optionalFeatures: ['dom-overlay', 'hand-tracking'],
-                domOverlay: { root: document.body }
-            };
-            
-            const session = await navigator.xr.requestSession('immersive-ar', sessionInit);
-            await this.renderer.xr.setSession(session);
-            
-            console.log('Entered AR mode');
-        } catch (error) {
-            console.error('Error entering AR:', error);
-            alert('Could not enter AR mode. Please check your device compatibility.');
-        }
-    }
     
     exitSession() {
         if (this.currentSession) {
