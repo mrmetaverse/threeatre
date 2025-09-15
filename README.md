@@ -111,7 +111,7 @@ This project is licensed under a custom license that allows free non-commercial 
 
 - ✅ **Non-commercial use**: Personal projects, education, research, open source contributions
 - ❌ **Commercial use**: Only permitted by AltonTech, Inc. or with explicit written permission
-- 📧 **Commercial licensing**: Contact hello@altontech.com
+- 📧 **Commercial licensing**: Contact jesse@alton.tech
 
 ## Contributing
 

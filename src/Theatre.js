@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { AvatarManager } from './AvatarManager.js';
+import { RoguelikeWorld } from './RoguelikeWorld.js';
 
 export class Theatre {
     constructor(scene) {
@@ -12,7 +13,10 @@ export class Theatre {
         this.videoTexture = null;
         this.users = new Map();
         this.avatarManager = new AvatarManager(scene);
+        this.roguelikeWorld = new RoguelikeWorld(scene, this);
         this.camera = null; // Will be set by main app
+        this.exitPortal = null;
+        this.networkManager = null; // Will be set by main app
         
         this.init();
     }
@@ -64,16 +68,8 @@ export class Theatre {
         // Create walls
         this.createWalls();
         
-        // Create ceiling
-        const ceilingGeometry = new THREE.PlaneGeometry(30, 40);
-        const ceilingMaterial = new THREE.MeshLambertMaterial({ 
-            color: 0x1a1a1a,
-            side: THREE.DoubleSide 
-        });
-        const ceiling = new THREE.Mesh(ceilingGeometry, ceilingMaterial);
-        ceiling.position.y = 8;
-        ceiling.rotation.x = Math.PI / 2;
-        this.scene.add(ceiling);
+        // Create megalithic vaulted ceiling - much higher like ancient pyramid chambers
+        this.createMegalithicCeiling();
         
         // Create elevated stage
         const stageGeometry = new THREE.BoxGeometry(30, 1.2, 6);
@@ -86,38 +82,198 @@ export class Theatre {
     }
     
     createWalls() {
-        const wallMaterial = new THREE.MeshLambertMaterial({ color: 0x3a3a3a });
+        // Ancient stone wall material with texture-like appearance
+        const stoneMaterial = new THREE.MeshLambertMaterial({ 
+            color: 0x4a3c2a,
+            roughness: 0.9
+        });
         
-        // Back wall
-        const backWallGeometry = new THREE.PlaneGeometry(30, 8);
-        const backWall = new THREE.Mesh(backWallGeometry, wallMaterial);
-        backWall.position.set(0, 4, -20);
+        // Back wall - massive stone blocks
+        const backWallGeometry = new THREE.BoxGeometry(32, 20, 2);
+        const backWall = new THREE.Mesh(backWallGeometry, stoneMaterial);
+        backWall.position.set(0, 10, -21);
+        backWall.receiveShadow = true;
         this.scene.add(backWall);
         this.walls.push(backWall);
         
-        // Left wall
-        const leftWallGeometry = new THREE.PlaneGeometry(40, 8);
-        const leftWall = new THREE.Mesh(leftWallGeometry, wallMaterial);
-        leftWall.position.set(-15, 4, 0);
-        leftWall.rotation.y = Math.PI / 2;
+        // Left wall - towering megalithic stones
+        const leftWallGeometry = new THREE.BoxGeometry(2, 20, 44);
+        const leftWall = new THREE.Mesh(leftWallGeometry, stoneMaterial);
+        leftWall.position.set(-16, 10, 0);
+        leftWall.receiveShadow = true;
         this.scene.add(leftWall);
         this.walls.push(leftWall);
         
-        // Right wall
-        const rightWallGeometry = new THREE.PlaneGeometry(40, 8);
-        const rightWall = new THREE.Mesh(rightWallGeometry, wallMaterial);
-        rightWall.position.set(15, 4, 0);
-        rightWall.rotation.y = -Math.PI / 2;
+        // Right wall - towering megalithic stones
+        const rightWallGeometry = new THREE.BoxGeometry(2, 20, 44);
+        const rightWall = new THREE.Mesh(rightWallGeometry, stoneMaterial);
+        rightWall.position.set(16, 10, 0);
+        rightWall.receiveShadow = true;
         this.scene.add(rightWall);
         this.walls.push(rightWall);
         
-        // Front wall (with entrance)
-        const frontWallGeometry = new THREE.PlaneGeometry(30, 8);
-        const frontWall = new THREE.Mesh(frontWallGeometry, wallMaterial);
-        frontWall.position.set(0, 4, 20);
-        frontWall.rotation.y = Math.PI;
-        this.scene.add(frontWall);
-        this.walls.push(frontWall);
+        // Front wall with exit door
+        this.createFrontWallWithExit(stoneMaterial);
+        
+        // Add megalithic pillars for atmosphere
+        this.createMegalithicPillars(stoneMaterial);
+    }
+    
+    createFrontWallWithExit(stoneMaterial) {
+        // Left part of front wall
+        const frontLeftGeometry = new THREE.BoxGeometry(10, 20, 2);
+        const frontLeft = new THREE.Mesh(frontLeftGeometry, stoneMaterial);
+        frontLeft.position.set(-11, 10, 21);
+        frontLeft.receiveShadow = true;
+        this.scene.add(frontLeft);
+        this.walls.push(frontLeft);
+        
+        // Right part of front wall
+        const frontRightGeometry = new THREE.BoxGeometry(10, 20, 2);
+        const frontRight = new THREE.Mesh(frontRightGeometry, stoneMaterial);
+        frontRight.position.set(11, 10, 21);
+        frontRight.receiveShadow = true;
+        this.scene.add(frontRight);
+        this.walls.push(frontRight);
+        
+        // Top part above exit
+        const frontTopGeometry = new THREE.BoxGeometry(12, 8, 2);
+        const frontTop = new THREE.Mesh(frontTopGeometry, stoneMaterial);
+        frontTop.position.set(0, 16, 21);
+        frontTop.receiveShadow = true;
+        this.scene.add(frontTop);
+        this.walls.push(frontTop);
+        
+        // Exit door frame - ominous dark opening
+        const doorFrameGeometry = new THREE.BoxGeometry(8.5, 12.5, 0.5);
+        const doorFrameMaterial = new THREE.MeshLambertMaterial({ color: 0x2a1f15 });
+        const doorFrame = new THREE.Mesh(doorFrameGeometry, doorFrameMaterial);
+        doorFrame.position.set(0, 6, 20.75);
+        this.scene.add(doorFrame);
+        
+        // Dark exit portal
+        const exitGeometry = new THREE.PlaneGeometry(7, 11);
+        const exitMaterial = new THREE.MeshBasicMaterial({ 
+            color: 0x000000,
+            transparent: true,
+            opacity: 0.9
+        });
+        this.exitPortal = new THREE.Mesh(exitGeometry, exitMaterial);
+        this.exitPortal.position.set(0, 6, 20.8);
+        this.exitPortal.name = 'exit-portal';
+        this.scene.add(this.exitPortal);
+        
+        // Warning signs near exit
+        this.createExitWarning();
+    }
+    
+    createExitWarning() {
+        // Create warning text above exit
+        const warningGeometry = new THREE.PlaneGeometry(6, 1);
+        const warningMaterial = new THREE.MeshBasicMaterial({ 
+            color: 0xff0000,
+            transparent: true,
+            opacity: 0.8
+        });
+        const warning = new THREE.Mesh(warningGeometry, warningMaterial);
+        warning.position.set(0, 13, 20.5);
+        this.scene.add(warning);
+        
+        // Add skull decorations
+        for (let i = 0; i < 3; i++) {
+            const skullGeometry = new THREE.SphereGeometry(0.3, 8, 6);
+            const skullMaterial = new THREE.MeshLambertMaterial({ color: 0xccccaa });
+            const skull = new THREE.Mesh(skullGeometry, skullMaterial);
+            skull.position.set((i - 1) * 2, 13.5, 20.3);
+            this.scene.add(skull);
+        }
+    }
+    
+    createMegalithicPillars(stoneMaterial) {
+        // Massive stone pillars supporting the ceiling
+        const pillarPositions = [
+            [-12, 0, -10], [12, 0, -10],
+            [-12, 0, 0], [12, 0, 0],
+            [-12, 0, 10], [12, 0, 10]
+        ];
+        
+        pillarPositions.forEach(pos => {
+            const pillarGeometry = new THREE.CylinderGeometry(1.5, 2, 18, 8);
+            const pillar = new THREE.Mesh(pillarGeometry, stoneMaterial);
+            pillar.position.set(pos[0], 9, pos[1]);
+            pillar.castShadow = true;
+            pillar.receiveShadow = true;
+            this.scene.add(pillar);
+            
+            // Add capital on top
+            const capitalGeometry = new THREE.CylinderGeometry(2.2, 1.8, 1, 8);
+            const capital = new THREE.Mesh(capitalGeometry, stoneMaterial);
+            capital.position.set(pos[0], 18.5, pos[1]);
+            capital.castShadow = true;
+            this.scene.add(capital);
+        });
+    }
+    
+    createMegalithicCeiling() {
+        const stoneMaterial = new THREE.MeshLambertMaterial({ 
+            color: 0x3a2f1f,
+            side: THREE.DoubleSide 
+        });
+        
+        // Create vaulted ceiling sections - pyramid chamber style
+        const ceilingHeight = 25;
+        const segments = 8;
+        
+        for (let i = 0; i < segments; i++) {
+            const angle = (i / segments) * Math.PI * 2;
+            const nextAngle = ((i + 1) / segments) * Math.PI * 2;
+            
+            // Create triangular ceiling sections
+            const geometry = new THREE.BufferGeometry();
+            const vertices = new Float32Array([
+                // Triangle pointing to center peak
+                0, ceilingHeight, 0,  // Peak
+                Math.cos(angle) * 15, 18, Math.sin(angle) * 20,  // Edge 1
+                Math.cos(nextAngle) * 15, 18, Math.sin(nextAngle) * 20   // Edge 2
+            ]);
+            
+            geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+            geometry.computeVertexNormals();
+            
+            const ceilingSection = new THREE.Mesh(geometry, stoneMaterial);
+            ceilingSection.receiveShadow = true;
+            this.scene.add(ceilingSection);
+        }
+        
+        // Add ancient hieroglyphs on ceiling (simple geometric patterns)
+        this.addCeilingDecorations();
+    }
+    
+    addCeilingDecorations() {
+        // Add mysterious glowing runes on the ceiling
+        const runePositions = [
+            [0, 22, -10], [0, 22, 0], [0, 22, 10],
+            [-8, 20, -5], [8, 20, -5], [-8, 20, 5], [8, 20, 5]
+        ];
+        
+        runePositions.forEach(pos => {
+            const runeGeometry = new THREE.RingGeometry(0.3, 0.8, 6);
+            const runeMaterial = new THREE.MeshBasicMaterial({ 
+                color: 0x4444ff,
+                transparent: true,
+                opacity: 0.6,
+                side: THREE.DoubleSide
+            });
+            const rune = new THREE.Mesh(runeGeometry, runeMaterial);
+            rune.position.set(pos[0], pos[1], pos[2]);
+            rune.rotation.x = -Math.PI / 2;
+            this.scene.add(rune);
+            
+            // Make runes glow and pulse
+            setInterval(() => {
+                runeMaterial.opacity = 0.3 + Math.sin(Date.now() * 0.003 + pos[0]) * 0.3;
+            }, 50);
+        });
     }
     
     createSeats() {
@@ -192,26 +348,54 @@ export class Theatre {
     }
     
     createLighting() {
-        // Screen lighting
-        const screenLight = new THREE.SpotLight(0xffffff, 0.5, 30, Math.PI / 6, 0.1);
-        screenLight.position.set(0, 10, -15);
+        // Dramatic screen lighting from above
+        const screenLight = new THREE.SpotLight(0xffffff, 0.8, 40, Math.PI / 8, 0.1);
+        screenLight.position.set(0, 15, -15);
         screenLight.target = this.screen;
         screenLight.castShadow = true;
         this.scene.add(screenLight);
         
-        // Ambient theatre lighting
-        const theatreLight1 = new THREE.PointLight(0xff6b35, 0.3, 20);
-        theatreLight1.position.set(-10, 6, 10);
-        this.scene.add(theatreLight1);
+        // Mysterious ambient lighting from the runes
+        const runeLight1 = new THREE.PointLight(0x4444ff, 0.4, 25);
+        runeLight1.position.set(0, 20, -10);
+        this.scene.add(runeLight1);
         
-        const theatreLight2 = new THREE.PointLight(0xff6b35, 0.3, 20);
-        theatreLight2.position.set(10, 6, 10);
-        this.scene.add(theatreLight2);
+        const runeLight2 = new THREE.PointLight(0x4444ff, 0.3, 20);
+        runeLight2.position.set(-8, 18, 0);
+        this.scene.add(runeLight2);
         
-        // Exit lighting
-        const exitLight = new THREE.PointLight(0x00ff00, 0.2, 10);
-        exitLight.position.set(0, 3, 18);
+        const runeLight3 = new THREE.PointLight(0x4444ff, 0.3, 20);
+        runeLight3.position.set(8, 18, 0);
+        this.scene.add(runeLight3);
+        
+        // Ancient torch lighting on pillars
+        const torchPositions = [
+            [-12, 15, -10], [12, 15, -10],
+            [-12, 15, 0], [12, 15, 0],
+            [-12, 15, 10], [12, 15, 10]
+        ];
+        
+        torchPositions.forEach(pos => {
+            const torchLight = new THREE.PointLight(0xff6600, 0.6, 15);
+            torchLight.position.set(pos[0], pos[1], pos[2]);
+            torchLight.castShadow = true;
+            this.scene.add(torchLight);
+            
+            // Flickering effect
+            setInterval(() => {
+                torchLight.intensity = 0.4 + Math.random() * 0.4;
+            }, 100 + Math.random() * 200);
+        });
+        
+        // Ominous exit lighting - red and foreboding
+        const exitLight = new THREE.PointLight(0xff0000, 0.3, 12);
+        exitLight.position.set(0, 8, 18);
         this.scene.add(exitLight);
+        
+        // Make exit light pulse ominously
+        setInterval(() => {
+            exitLight.intensity = 0.2 + Math.sin(Date.now() * 0.005) * 0.2;
+        }, 50);
     }
     
     setupTheatreAudio() {
@@ -278,7 +462,14 @@ export class Theatre {
         
         // Wait for video to load before creating texture
         this.hostVideo.addEventListener('loadedmetadata', () => {
-            console.log('Video loaded, dimensions:', this.hostVideo.videoWidth, 'x', this.hostVideo.videoHeight);
+            const videoWidth = this.hostVideo.videoWidth;
+            const videoHeight = this.hostVideo.videoHeight;
+            const aspectRatio = videoWidth / videoHeight;
+            
+            console.log('Video loaded, dimensions:', videoWidth, 'x', videoHeight, 'aspect:', aspectRatio);
+            
+            // Adjust screen size to match content aspect ratio
+            this.adjustScreenToContent(aspectRatio);
             
             // Create video texture
             this.videoTexture = new THREE.VideoTexture(this.hostVideo);
@@ -294,7 +485,7 @@ export class Theatre {
                 side: THREE.DoubleSide
             });
             
-            console.log('Video texture applied to screen');
+            console.log('Video texture applied to screen with aspect ratio:', aspectRatio);
         });
         
         this.hostVideo.addEventListener('canplay', () => {
@@ -310,6 +501,30 @@ export class Theatre {
         });
         
         console.log('Host stream set on theatre screen');
+    }
+    
+    adjustScreenToContent(aspectRatio) {
+        // Maximum screen dimensions
+        const maxWidth = 22;
+        const maxHeight = 12;
+        
+        let screenWidth, screenHeight;
+        
+        if (aspectRatio > maxWidth / maxHeight) {
+            // Video is wider - fit to max width
+            screenWidth = maxWidth;
+            screenHeight = maxWidth / aspectRatio;
+        } else {
+            // Video is taller - fit to max height
+            screenHeight = maxHeight;
+            screenWidth = maxHeight * aspectRatio;
+        }
+        
+        // Update screen geometry
+        this.screen.geometry.dispose();
+        this.screen.geometry = new THREE.PlaneGeometry(screenWidth, screenHeight);
+        
+        console.log('Screen resized to:', screenWidth, 'x', screenHeight, 'for aspect ratio:', aspectRatio);
     }
     
     stopHostStream() {
@@ -469,6 +684,15 @@ export class Theatre {
         // Update avatar manager
         this.avatarManager.update(deltaTime);
         
+        // Update roguelike world
+        const playerPosition = this.camera ? this.camera.position : null;
+        this.roguelikeWorld.update(deltaTime, playerPosition);
+        
+        // Check for exit/return collisions
+        if (playerPosition) {
+            this.checkWorldTransitions(playerPosition);
+        }
+        
         // Update user avatars with simple idle animation
         this.users.forEach(user => {
             if (user.avatarType === 'simple') {
@@ -478,6 +702,18 @@ export class Theatre {
                 user.avatar.position.y = originalY + Math.sin(time + user.id.length) * 0.02;
             }
         });
+    }
+    
+    checkWorldTransitions(playerPosition) {
+        // Check if player wants to exit theatre
+        if (!this.roguelikeWorld.isActive && this.roguelikeWorld.checkExitCollision(playerPosition)) {
+            this.roguelikeWorld.enterWorld(playerPosition);
+        }
+        
+        // Check if player wants to return to theatre
+        if (this.roguelikeWorld.isActive && this.roguelikeWorld.checkReturnCollision(playerPosition)) {
+            this.roguelikeWorld.hideWorld();
+        }
     }
     
     dispose() {
@@ -491,6 +727,9 @@ export class Theatre {
         
         // Dispose avatar manager
         this.avatarManager.dispose();
+        
+        // Dispose roguelike world
+        this.roguelikeWorld.dispose();
     }
     
     // Set camera for OMI audio listener
@@ -502,18 +741,11 @@ export class Theatre {
             camera.add(this.avatarManager.audioListener);
             console.log('OMI Audio: 3D audio listener attached to camera');
         }
-        
-        // Clean up geometry and materials
-        this.scene.traverse((child) => {
-            if (child.geometry) child.geometry.dispose();
-            if (child.material) {
-                if (Array.isArray(child.material)) {
-                    child.material.forEach(material => material.dispose());
-                } else {
-                    child.material.dispose();
-                }
-            }
-        });
+    }
+    
+    // Set network manager for world transitions
+    setNetworkManager(networkManager) {
+        this.networkManager = networkManager;
     }
     
     // New method for VRM avatar upload

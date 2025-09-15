@@ -60,6 +60,9 @@ class TheatreApp {
         // Create network manager
         this.networkManager = new NetworkManager(this);
         
+        // Connect network manager to theatre
+        this.theatre.setNetworkManager(this.networkManager);
+        
         // Setup lighting
         this.setupLighting();
         
