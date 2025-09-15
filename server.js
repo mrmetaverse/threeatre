@@ -263,6 +263,88 @@ io.on('connection', (socket) => {
         }
     });
     
+    socket.on('chat-message', (data) => {
+        const { roomId, message, userName } = data;
+        const room = rooms.get(roomId);
+        
+        if (room && socket.userId) {
+            // Broadcast message to all users in room except sender
+            socket.to(roomId).emit('chat-message', {
+                userId: socket.userId,
+                message: message,
+                userName: userName,
+                timestamp: Date.now()
+            });
+            console.log(`Chat message from ${socket.userId} in room ${roomId}: ${message}`);
+        }
+    });
+    
+    socket.on('voice-status', (data) => {
+        const { roomId, enabled } = data;
+        const room = rooms.get(roomId);
+        
+        if (room && socket.userId) {
+            socket.to(roomId).emit('voice-status', {
+                userId: socket.userId,
+                enabled: enabled
+            });
+        }
+    });
+    
+    socket.on('voice-offer', (data) => {
+        const { roomId, targetUserId, offer } = data;
+        const room = rooms.get(roomId);
+        
+        if (room && socket.userId) {
+            // Forward offer to target user
+            const targetSocket = [...io.sockets.sockets.values()]
+                .find(s => s.userId === targetUserId && s.currentRoom === roomId);
+            
+            if (targetSocket) {
+                targetSocket.emit('voice-offer', {
+                    fromUserId: socket.userId,
+                    offer: offer
+                });
+            }
+        }
+    });
+    
+    socket.on('voice-answer', (data) => {
+        const { roomId, targetUserId, answer } = data;
+        const room = rooms.get(roomId);
+        
+        if (room && socket.userId) {
+            // Forward answer to target user
+            const targetSocket = [...io.sockets.sockets.values()]
+                .find(s => s.userId === targetUserId && s.currentRoom === roomId);
+            
+            if (targetSocket) {
+                targetSocket.emit('voice-answer', {
+                    fromUserId: socket.userId,
+                    answer: answer
+                });
+            }
+        }
+    });
+    
+    socket.on('voice-ice-candidate', (data) => {
+        const { roomId, targetUserId, candidate } = data;
+        const room = rooms.get(roomId);
+        
+        if (room && socket.userId) {
+            // Forward ICE candidate to target user
+            const targetSocket = [...io.sockets.sockets.values()]
+                .find(s => s.userId === targetUserId && s.currentRoom === roomId);
+            
+            if (targetSocket) {
+                targetSocket.emit('voice-ice-candidate', {
+                    fromUserId: socket.userId,
+                    candidate: candidate
+                });
+            }
+        }
+    });
+    
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.id);
         

@@ -4,6 +4,7 @@ import { Theatre } from './Theatre.js';
 import { WebXRManager } from './WebXRManager.js';
 import { NetworkManager } from './NetworkManager.js';
 import { OMISeat } from './OMISeat.js';
+import { ChatManager } from './ChatManager.js';
 
 class TheatreApp {
     constructor() {
@@ -15,6 +16,7 @@ class TheatreApp {
         this.networkManager = null;
         this.orbitControls = null;
         this.omiSeat = null;
+        this.chatManager = null;
         this.isHost = false;
         this.users = new Map();
         this.controls = {
@@ -86,6 +88,9 @@ class TheatreApp {
         
         // Setup OMI seat system
         this.omiSeat = new OMISeat(this.theatre, this.camera, this.orbitControls);
+        
+        // Setup chat system
+        this.chatManager = new ChatManager(this.networkManager, this.scene);
         
         // Setup lighting
         this.setupLighting();
