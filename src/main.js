@@ -6,6 +6,8 @@ import { NetworkManager } from './NetworkManager.js';
 import { OMISeat } from './OMISeat.js';
 import { ChatManager } from './ChatManager.js';
 import { Bindle } from './Bindle.js';
+import { LicenseManager } from './LicenseManager.js';
+import { RoomCodeManager } from './RoomCodeManager.js';
 
 class TheatreApp {
     constructor() {
@@ -19,6 +21,8 @@ class TheatreApp {
         this.omiSeat = null;
         this.chatManager = null;
         this.bindle = null;
+        this.licenseManager = null;
+        this.roomCodeManager = null;
         this.isHost = false;
         this.users = new Map();
         this.controls = {
@@ -80,8 +84,14 @@ class TheatreApp {
         // Create WebXR manager
         this.webxrManager = new WebXRManager(this.renderer);
         
+        // Setup license system first
+        this.licenseManager = new LicenseManager();
+        
         // Create network manager
         this.networkManager = new NetworkManager(this);
+        
+        // Setup room code system
+        this.roomCodeManager = new RoomCodeManager(this.networkManager, this.licenseManager);
         
         // Connect network manager to theatre
         this.theatre.setNetworkManager(this.networkManager);
