@@ -2,11 +2,13 @@
 
 A collaborative WebXR movie theatre experience built with Three.js and Socket.IO. Created by [mrmetaverse](https://altontech.com)
 
-[![License: Custom](https://img.shields.io/badge/License-Custom-blue.svg)](LICENSE)
+
+
+[![License: Custom](https://img.shields.io/badge/License-Custom-blue.svg)](LICENSE) for now, TBD
 [![Built with Three.js](https://img.shields.io/badge/Built%20with-Three.js-orange.svg)](https://threejs.org/)
 [![WebXR](https://img.shields.io/badge/WebXR-Compatible-green.svg)](https://immersiveweb.dev/)
 
-## Features
+## Almost Features
 
 - **3D Virtual Theatre**: Immersive theatre environment with seats and a large screen
 - **WebXR Support**: Full VR and AR support for immersive experiences  
@@ -18,6 +20,8 @@ A collaborative WebXR movie theatre experience built with Three.js and Socket.IO
 - **Movement Controls**: WASD/Arrow keys for walking around, mouse look controls
 - **Advanced Rendering**: WebGL rendering with shadow mapping and lighting
 - **Room Sharing**: Generate shareable room URLs to invite friends
+
+> It's buggy, but would be fun if it gets working. I thought about a jackbox inspired model where a person can host a room. 
 
 ## Quick Start
 
@@ -116,10 +120,6 @@ This project is licensed under a custom license that allows free non-commercial 
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request. By contributing, you agree that your contributions will be licensed under the same license as the project.
-
-## About AltonTech
-
-[AltonTech, Inc.](https://altontech.com) specializes in AI enablement, product development, and immersive technologies. Founded by Jesse Alton, we focus on creating innovative solutions for the open metaverse.
 
 ## Deployment
 
