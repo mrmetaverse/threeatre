@@ -49,6 +49,9 @@ class TheatreApp {
         this.tomatoPower = 0;
         this.maxTomatoPower = 3.0;
         this.isPrivateRoom = false;
+        this.cameraMode = 'first-person'; // 'first-person' or 'third-person'
+        this.thirdPersonDistance = 8;
+        this.playerAvatar = null;
         
         this.init();
         this.setupEventListeners();
@@ -122,6 +125,9 @@ class TheatreApp {
         
         // Initialize privacy UI
         setTimeout(() => this.updatePrivacyUI(), 1000);
+        
+        // Create player avatar for third-person view
+        this.createPlayerAvatar();
     }
     
     async initRenderer() {
@@ -743,25 +749,122 @@ class TheatreApp {
     setupOrbitControls() {
         this.orbitControls = new OrbitControls(this.camera, this.renderer.domElement);
         
-        // Configure for theatre experience with gravity
+        // Configure for first-person/third-person switching
         this.orbitControls.enableDamping = true;
         this.orbitControls.dampingFactor = 0.05;
         this.orbitControls.enableZoom = true;
-        this.orbitControls.enablePan = false; // Disable panning to prevent floating
+        this.orbitControls.enablePan = false;
         
-        // Set limits for more natural movement
-        this.orbitControls.maxPolarAngle = Math.PI * 0.8; // Prevent looking too far up
-        this.orbitControls.minPolarAngle = Math.PI * 0.1; // Prevent looking too far down
-        this.orbitControls.maxDistance = 100; // Allow zooming out to see the massive space
-        this.orbitControls.minDistance = 2;
+        // Set limits for camera movement
+        this.orbitControls.maxPolarAngle = Math.PI * 0.9;
+        this.orbitControls.minPolarAngle = Math.PI * 0.1;
+        this.orbitControls.maxDistance = 50; // Max third-person distance
+        this.orbitControls.minDistance = 0.1; // Close to first-person
         
-        // Set target to the center of the theatre
-        this.orbitControls.target.set(0, 10, -20);
+        // Start in first-person mode
+        this.orbitControls.target.copy(this.camera.position);
+        this.orbitControls.target.z -= 1; // Look forward
+        
+        // Listen for zoom changes to switch camera modes
+        this.orbitControls.addEventListener('change', () => {
+            this.handleCameraZoomChange();
+        });
         
         // Disable orbit controls when in VR/AR
         this.orbitControls.enabled = !this.renderer.xr.isPresenting;
         
-        console.log('Orbit controls configured for massive theatre');
+        console.log('Orbit controls configured with first/third person switching');
+    }
+    
+    async createPlayerAvatar() {
+        try {
+            // Create player avatar using the same system as other users
+            const userData = {
+                id: 'local-player',
+                name: 'You',
+                color: this.generateUserColor()
+            };
+            
+            const avatarInfo = await this.theatre.addUser('local-player', userData);
+            this.playerAvatar = avatarInfo.avatar;
+            
+            // Start hidden (first-person mode)
+            this.playerAvatar.visible = false;
+            
+            console.log('Player avatar created for third-person view');
+        } catch (error) {
+            console.warn('Failed to create player avatar:', error);
+        }
+    }
+    
+    handleCameraZoomChange() {
+        if (!this.orbitControls) return;
+        
+        const distance = this.camera.position.distanceTo(this.orbitControls.target);
+        
+        // Switch between first and third person based on zoom distance
+        if (distance < 3 && this.cameraMode === 'third-person') {
+            this.switchToFirstPerson();
+        } else if (distance >= 3 && this.cameraMode === 'first-person') {
+            this.switchToThirdPerson();
+        }
+        
+        // Update player avatar position in third-person
+        if (this.cameraMode === 'third-person' && this.playerAvatar) {
+            this.updatePlayerAvatarPosition();
+        }
+    }
+    
+    switchToFirstPerson() {
+        this.cameraMode = 'first-person';
+        
+        // Hide player avatar
+        if (this.playerAvatar) {
+            this.playerAvatar.visible = false;
+        }
+        
+        // Set camera target to look forward
+        const lookTarget = this.camera.position.clone();
+        const forward = new THREE.Vector3();
+        this.camera.getWorldDirection(forward);
+        lookTarget.add(forward.multiplyScalar(5));
+        this.orbitControls.target.copy(lookTarget);
+        
+        console.log('📷 Switched to first-person view');
+    }
+    
+    switchToThirdPerson() {
+        this.cameraMode = 'third-person';
+        
+        // Show player avatar
+        if (this.playerAvatar) {
+            this.playerAvatar.visible = true;
+            this.updatePlayerAvatarPosition();
+        }
+        
+        console.log('👤 Switched to third-person view');
+    }
+    
+    updatePlayerAvatarPosition() {
+        if (!this.playerAvatar || !this.orbitControls) return;
+        
+        // Position avatar at the orbit target (where camera is looking)
+        this.playerAvatar.position.copy(this.orbitControls.target);
+        
+        // Adjust for ground height
+        const groundHeight = this.getGroundHeight(this.playerAvatar.position);
+        this.playerAvatar.position.y = groundHeight + 1.6; // Standing height
+        
+        // Make avatar look in the direction the camera is facing
+        const cameraDirection = new THREE.Vector3();
+        this.camera.getWorldDirection(cameraDirection);
+        cameraDirection.y = 0; // Keep horizontal
+        cameraDirection.normalize();
+        
+        if (cameraDirection.length() > 0) {
+            const lookAtPoint = this.playerAvatar.position.clone().add(cameraDirection);
+            this.playerAvatar.lookAt(lookAtPoint);
+        }
     }
     
     setupControls() {
@@ -839,9 +942,10 @@ class TheatreApp {
         this.renderer.domElement.addEventListener('click', (event) => this.onMouseClick(event));
         this.renderer.domElement.addEventListener('mousemove', (event) => this.onMouseMove(event));
         
-        // Double-click for pointer lock (to avoid conflicts with seat selection)
-        this.renderer.domElement.addEventListener('dblclick', () => {
-            if (!this.renderer.xr.isPresenting && document.pointerLockElement !== this.renderer.domElement) {
+        // Right-click for pointer lock in first-person mode
+        this.renderer.domElement.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            if (!this.renderer.xr.isPresenting && this.cameraMode === 'first-person' && document.pointerLockElement !== this.renderer.domElement) {
                 this.renderer.domElement.requestPointerLock();
             }
         });
@@ -1001,11 +1105,25 @@ class TheatreApp {
             
             this.camera.position.copy(newPosition);
             
-            // Update orbit controls target to follow player
+            // Update orbit controls target based on camera mode
             if (this.orbitControls) {
-                this.orbitControls.target.copy(this.camera.position);
-                this.orbitControls.target.y = this.camera.position.y;
-                this.orbitControls.target.addScaledVector(cameraDirection, 5);
+                if (this.cameraMode === 'first-person') {
+                    // In first person, target moves with camera
+                    const lookTarget = this.camera.position.clone();
+                    const forward = new THREE.Vector3();
+                    this.camera.getWorldDirection(forward);
+                    lookTarget.add(forward.multiplyScalar(5));
+                    this.orbitControls.target.copy(lookTarget);
+                } else {
+                    // In third person, target is the player avatar position
+                    this.orbitControls.target.copy(newPosition);
+                    this.orbitControls.target.y = newPosition.y;
+                }
+            }
+            
+            // Update player avatar in third-person mode
+            if (this.cameraMode === 'third-person' && this.playerAvatar) {
+                this.updatePlayerAvatarPosition();
             }
             
             // Send position update to network

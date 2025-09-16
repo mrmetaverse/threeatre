@@ -46,10 +46,14 @@ export class NetworkManager {
     
     setupEventListeners() {
         this.socket.on('connect', () => {
-            console.log('Connected to server');
+            console.log('✅ Connected to server:', serverUrl);
             this.isConnected = true;
             this.joinRoom();
             this.updateConnectionStatus('Connected');
+            
+            // Hide any offline messages
+            const offlineMsg = document.querySelector('[data-offline-message]');
+            if (offlineMsg) offlineMsg.remove();
         });
         
         this.socket.on('disconnect', () => {
@@ -59,7 +63,8 @@ export class NetworkManager {
         });
         
         this.socket.on('connect_error', (error) => {
-            console.error('Connection error:', error);
+            console.error('❌ Connection error:', error);
+            console.log('🔄 Trying P2P mode as fallback...');
             this.updateConnectionStatus('P2P Mode');
             this.enableP2PMode();
         });
