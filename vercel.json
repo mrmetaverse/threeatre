@@ -1,5 +1,10 @@
 {
   "version": 2,
+  "functions": {
+    "api/socket.js": {
+      "runtime": "nodejs18.x"
+    }
+  },
   "builds": [
     {
       "src": "package.json",
@@ -10,6 +15,10 @@
     }
   ],
   "routes": [
+    {
+      "src": "/socket.io/(.*)",
+      "dest": "/api/socket.js"
+    },
     {
       "src": "/(.*)",
       "dest": "/dist/$1"

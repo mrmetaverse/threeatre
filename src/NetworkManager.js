@@ -25,14 +25,17 @@ export class NetworkManager {
             // Local development
             serverUrl = 'http://localhost:3001';
         } else {
-            // Production - try multiple backend options
-            serverUrl = this.getProductionServerUrl();
+            // Production - use Vercel serverless function
+            serverUrl = window.location.origin;
         }
         
         this.socket = io(serverUrl, {
+            path: '/socket.io/',
             transports: ['websocket', 'polling'],
             upgrade: true,
-            rememberUpgrade: true
+            rememberUpgrade: true,
+            timeout: 10000,
+            forceNew: true
         });
         
         this.setupEventListeners();
