@@ -7,7 +7,7 @@ export class AvatarManager {
         this.scene = scene;
         this.gltfLoader = new GLTFLoader();
         this.avatars = new Map();
-        this.defaultAvatarUrl = '/assets/default-avatar.vrm'; // We'll create this
+        this.defaultAvatarUrl = '/assets/MisfitPixels600.vrm'; // Use MisfitPixels VRM
         
         // Setup VRM loader plugin
         this.gltfLoader.register((parser) => {
@@ -70,7 +70,7 @@ export class AvatarManager {
             const vrm = await this.loadVRMAvatar(this.defaultAvatarUrl, userId, userData);
             return vrm;
         } catch (error) {
-            console.warn('Default VRM not found, creating simple avatar:', error);
+            console.warn('MisfitPixels VRM failed to load, using simple avatar:', error);
             // Fallback to simple geometric avatar
             return this.createSimpleAvatar(userId, userData);
         }

@@ -284,10 +284,10 @@ export class Bindle {
         // Add some starting items to the bindle
         const startingItems = [
             { type: 'consumable', name: 'Tomato', icon: '🍅', description: 'A fresh tomato for throwing', stackable: true, quantity: 5 },
-            { type: 'equipment', name: 'Theatre Mask', icon: '🎭', description: 'A mysterious theatre mask', slot: 'head', stats: { charisma: +2 } },
-            { type: 'equipment', name: 'Comfy Slippers', icon: '🥿', description: 'Perfect for theatre walking', slot: 'feet', stats: { speed: +1 } },
+            { type: 'equipment', name: 'Pixel Mask', icon: '🎭', description: 'A retro pixel art mask for MisfitPixels fans', slot: 'head', stats: { charisma: +2, style: +1 }, rarity: 'uncommon' },
+            { type: 'equipment', name: 'Pixel Boots', icon: '👟', description: 'Stylish pixel art boots', slot: 'feet', stats: { speed: +1, style: +1 }, rarity: 'uncommon' },
             { type: 'consumable', name: 'Popcorn', icon: '🍿', description: 'Classic movie snack', stackable: true, quantity: 3 },
-            { type: 'equipment', name: 'Magic Wand', icon: '🪄', description: 'Enhances tomato throwing power', slot: 'rightHand', stats: { power: +1 } }
+            { type: 'equipment', name: 'Pixel Wand', icon: '🪄', description: 'A magical pixel art wand that enhances abilities', slot: 'rightHand', stats: { power: +1, magic: +1 }, rarity: 'rare' }
         ];
         
         startingItems.forEach((item, index) => {
