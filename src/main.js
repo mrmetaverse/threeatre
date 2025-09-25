@@ -8,6 +8,7 @@ import { ChatManager } from './ChatManager.js';
 import { Bindle } from './Bindle.js';
 import { LicenseManager } from './LicenseManager.js';
 import { RoomCodeManager } from './RoomCodeManager.js';
+import { WearableManager } from './WearableManager.js';
 
 class TheatreApp {
     constructor() {
@@ -23,6 +24,7 @@ class TheatreApp {
         this.bindle = null;
         this.licenseManager = null;
         this.roomCodeManager = null;
+        this.wearableManager = null;
         this.isHost = false;
         this.users = new Map();
         this.controls = {
@@ -111,8 +113,14 @@ class TheatreApp {
         // Setup chat system
         this.chatManager = new ChatManager(this.networkManager, this.scene);
         
+        // Setup wearable manager
+        this.wearableManager = new WearableManager(this.scene, this.theatre.avatarManager);
+        
         // Setup bindle inventory system
         this.bindle = new Bindle(this.networkManager);
+        
+        // Connect wearable manager to bindle
+        this.bindle.setWearableManager(this.wearableManager);
         
         // Setup lighting
         this.setupLighting();
@@ -755,11 +763,11 @@ class TheatreApp {
         this.orbitControls.enableZoom = true;
         this.orbitControls.enablePan = false;
         
-        // Set limits for camera movement
-        this.orbitControls.maxPolarAngle = Math.PI * 0.9;
+        // Set limits for camera movement - prevent going through floor
+        this.orbitControls.maxPolarAngle = Math.PI * 0.85; // Prevent looking too far down
         this.orbitControls.minPolarAngle = Math.PI * 0.1;
         this.orbitControls.maxDistance = 50; // Max third-person distance
-        this.orbitControls.minDistance = 0.1; // Close to first-person
+        this.orbitControls.minDistance = 0.5; // Prevent getting too close to prevent clipping
         
         // Start in first-person mode
         this.orbitControls.target.copy(this.camera.position);
@@ -768,6 +776,7 @@ class TheatreApp {
         // Listen for zoom changes to switch camera modes
         this.orbitControls.addEventListener('change', () => {
             this.handleCameraZoomChange();
+            this.enforceGroundCollision();
         });
         
         // Disable orbit controls when in VR/AR
@@ -803,15 +812,37 @@ class TheatreApp {
         const distance = this.camera.position.distanceTo(this.orbitControls.target);
         
         // Switch between first and third person based on zoom distance
-        if (distance < 3 && this.cameraMode === 'third-person') {
+        if (distance < 2 && this.cameraMode === 'third-person') {
             this.switchToFirstPerson();
-        } else if (distance >= 3 && this.cameraMode === 'first-person') {
+        } else if (distance >= 2 && this.cameraMode === 'first-person') {
             this.switchToThirdPerson();
         }
         
         // Update player avatar position in third-person
         if (this.cameraMode === 'third-person' && this.playerAvatar) {
             this.updatePlayerAvatarPosition();
+        }
+    }
+    
+    enforceGroundCollision() {
+        if (!this.orbitControls) return;
+        
+        const cameraPosition = this.camera.position;
+        const groundHeight = this.getGroundHeight(cameraPosition);
+        const minCameraHeight = groundHeight + 1.2; // Minimum height above ground
+        
+        // Prevent camera from going below ground level
+        if (cameraPosition.y < minCameraHeight) {
+            cameraPosition.y = minCameraHeight;
+            this.orbitControls.update();
+        }
+        
+        // Also check the orbit target
+        const targetGroundHeight = this.getGroundHeight(this.orbitControls.target);
+        const minTargetHeight = targetGroundHeight + 0.5;
+        
+        if (this.orbitControls.target.y < minTargetHeight) {
+            this.orbitControls.target.y = minTargetHeight;
         }
     }
     
@@ -1134,12 +1165,16 @@ class TheatreApp {
     }
     
     getGroundHeight(position) {
-        // Simple ground height detection for the theatre
+        // Enhanced ground height detection for the theatre
         // In recessed seating area
         if (position.z < 3 && position.z > -45) {
             return -1.5 + Math.max(0, (position.z + 42) / 3.3) * 0.15;
         }
-        // On main floor
+        // Stage area (slightly elevated)
+        if (position.z > 3 && position.z < 8) {
+            return 0.3;
+        }
+        // Main floor
         return 0;
     }
     
@@ -1148,6 +1183,12 @@ class TheatreApp {
         
         this.updateMovement(deltaTime);
         this.theatre.update();
+        
+        // Update wearables animation
+        if (this.wearableManager) {
+            this.wearableManager.updateWearables(deltaTime);
+        }
+        
         this.renderer.render(this.scene, this.camera);
     }
     

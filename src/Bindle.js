@@ -1,3 +1,5 @@
+import { WearableManager } from './WearableManager.js';
+
 export class Bindle {
     constructor(networkManager) {
         this.networkManager = networkManager;
@@ -5,7 +7,14 @@ export class Bindle {
         this.inventory = new Array(8 * 10).fill(null); // 8x10 grid like Diablo II
         this.equipment = {
             head: null,
-            chest: null,
+            face: null,
+            eyes: null,
+            ear: null,
+            neck: null,
+            torso: null,
+            back: null,
+            hands: null,
+            finger: null,
             legs: null,
             feet: null,
             leftHand: null,
@@ -13,6 +22,10 @@ export class Bindle {
             accessory1: null,
             accessory2: null
         };
+        
+        // Wearable system
+        this.wearableManager = null;
+        this.loadedWearables = new Map(); // Cache for loaded 3D models
         this.draggedItem = null;
         this.draggedFromSlot = null;
         
@@ -23,6 +36,16 @@ export class Bindle {
         this.createBindleUI();
         this.setupEventListeners();
         this.generateStartingItems();
+        this.initWearableSystem();
+    }
+    
+    initWearableSystem() {
+        // Initialize wearable manager - will be properly set up when scene and avatar manager are available
+        this.wearableManager = null;
+    }
+    
+    setWearableManager(wearableManager) {
+        this.wearableManager = wearableManager;
     }
     
     createBindleUI() {
@@ -398,7 +421,7 @@ export class Bindle {
     }
     
     equipItem(item, slotIndex) {
-        if (!item || item.type !== 'equipment') return false;
+        if (!item || (item.type !== 'equipment' && item.type !== 'wearable')) return false;
         
         const equipSlot = item.slot;
         if (!this.equipment.hasOwnProperty(equipSlot)) return false;
@@ -406,6 +429,11 @@ export class Bindle {
         // Unequip current item if any
         const currentEquipped = this.equipment[equipSlot];
         if (currentEquipped) {
+            // Unload 3D model if it's a wearable
+            if (currentEquipped.type === 'wearable') {
+                this.unequipWearable(currentEquipped);
+            }
+            
             // Try to put it back in inventory
             const emptySlot = this.inventory.findIndex(slot => slot === null);
             if (emptySlot !== -1) {
@@ -417,6 +445,11 @@ export class Bindle {
         this.equipment[equipSlot] = item;
         this.inventory[slotIndex] = null;
         
+        // Load 3D model if it's a wearable
+        if (item.type === 'wearable') {
+            this.equipWearable(item);
+        }
+        
         // Update UIs
         this.updateInventorySlotUI(slotIndex, null);
         this.updateEquipmentSlotUI(equipSlot, item);
@@ -426,6 +459,41 @@ export class Bindle {
         
         console.log(`Equipped ${item.name} to ${equipSlot}`);
         return true;
+    }
+    
+    async equipWearable(item) {
+        if (!this.wearableManager || !item.model) return;
+        
+        try {
+            // Load the 3D model
+            const wearableModel = await this.wearableManager.loadWearable(item.model, item.slot);
+            
+            // Attach to avatar
+            await this.wearableManager.attachWearable(wearableModel, item.slot);
+            
+            // Cache the loaded model
+            this.loadedWearables.set(item.id, wearableModel);
+            
+            console.log(`🎭 Equipped wearable: ${item.name}`);
+        } catch (error) {
+            console.error('Failed to equip wearable:', error);
+        }
+    }
+    
+    async unequipWearable(item) {
+        if (!this.wearableManager) return;
+        
+        try {
+            // Remove from avatar
+            await this.wearableManager.detachWearable(item.slot);
+            
+            // Remove from cache
+            this.loadedWearables.delete(item.id);
+            
+            console.log(`🎭 Unequipped wearable: ${item.name}`);
+        } catch (error) {
+            console.error('Failed to unequip wearable:', error);
+        }
     }
     
     updateEquipmentSlotUI(slotType, item) {

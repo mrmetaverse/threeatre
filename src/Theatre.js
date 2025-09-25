@@ -574,8 +574,9 @@ export class Theatre {
             // Try to load default avatar (VRM or simple)
             const avatar = await this.avatarManager.loadDefaultAvatar(userId, userData);
             
-            // Position avatar at entrance
-            avatar.scene.position.set(0, 0, 15);
+            // Position avatar at a random entrance location to prevent z-fighting
+            const spawnPosition = this.getRandomSpawnPosition();
+            avatar.scene.position.copy(spawnPosition);
             
             const userInfo = {
                 id: userId,
@@ -593,7 +594,8 @@ export class Theatre {
             console.error('Failed to add user avatar:', error);
             // Fallback to simple avatar if VRM fails
             const avatar = this.avatarManager.createSimpleAvatar(userId, userData);
-            avatar.scene.position.set(0, 0, 15);
+            const spawnPosition = this.getRandomSpawnPosition();
+            avatar.scene.position.copy(spawnPosition);
             
             const userInfo = {
                 id: userId,
@@ -607,6 +609,46 @@ export class Theatre {
             this.users.set(userId, userInfo);
             return userInfo;
         }
+    }
+    
+    getRandomSpawnPosition() {
+        // Create spawn positions in a circle around the entrance area
+        const spawnRadius = 4; // Radius of spawn circle
+        const centerX = 0;
+        const centerZ = 15;
+        const minDistance = 1.5; // Minimum distance between avatars
+        
+        let attempts = 0;
+        let position;
+        
+        do {
+            // Random angle for circular distribution
+            const angle = Math.random() * Math.PI * 2;
+            const distance = minDistance + Math.random() * (spawnRadius - minDistance);
+            
+            const x = centerX + Math.cos(angle) * distance;
+            const z = centerZ + Math.sin(angle) * distance;
+            const y = 0; // Ground level
+            
+            position = new THREE.Vector3(x, y, z);
+            attempts++;
+            
+            // If we've tried many times, just accept the position
+            if (attempts > 20) break;
+            
+        } while (this.isPositionTooClose(position, minDistance));
+        
+        return position;
+    }
+    
+    isPositionTooClose(newPosition, minDistance) {
+        // Check if the new position is too close to existing avatars
+        for (const [userId, user] of this.users) {
+            if (user.position && user.position.distanceTo(newPosition) < minDistance) {
+                return true;
+            }
+        }
+        return false;
     }
     
     removeUser(userId) {

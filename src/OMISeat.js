@@ -174,12 +174,16 @@ export class OMISeat {
     }
     
     getGroundHeight(position) {
-        // Simple ground height detection for the massive theatre
+        // Enhanced ground height detection for the theatre
         // In recessed seating area
         if (position.z < 3 && position.z > -45) {
             return -1.5 + Math.max(0, (position.z + 42) / 3.3) * 0.15;
         }
-        // On main floor
+        // Stage area (slightly elevated)
+        if (position.z > 3 && position.z < 8) {
+            return 0.3;
+        }
+        // Main floor
         return 0;
     }
     

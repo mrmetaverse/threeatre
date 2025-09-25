@@ -498,8 +498,8 @@ export class RoguelikeWorld {
         // Hide prompt
         this.hideTreasurePrompt();
         
-        // Show victory message
-        this.showTreasureVictory();
+        // Show victory message with loot info
+        this.showTreasureVictory(loot);
         
         console.log('💰 Treasure chest opened! Score:', this.playerScore);
         return true;
@@ -557,31 +557,69 @@ export class RoguelikeWorld {
         animateParticles();
     }
     
-    showTreasureVictory() {
+    showTreasureVictory(loot) {
         const victoryDiv = document.createElement('div');
+        
+        // Get rarity color
+        const rarityColors = {
+            common: '#ffffff',
+            uncommon: '#1eff00',
+            rare: '#0070dd',
+            epic: '#a335ee',
+            legendary: '#ff8000',
+            mythic: '#e6cc80'
+        };
+        
+        const rarityColor = rarityColors[loot?.rarity] || '#FFD700';
+        const isWearable = loot?.type === 'wearable';
+        
         victoryDiv.style.cssText = `
             position: fixed;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            background: rgba(255, 215, 0, 0.3);
-            border: 3px solid #FFD700;
+            background: rgba(0, 0, 0, 0.95);
+            border: 3px solid ${rarityColor};
             border-radius: 20px;
             padding: 30px;
-            color: #FFD700;
+            color: ${rarityColor};
             font-size: 24px;
             font-weight: bold;
             z-index: 1000;
             text-align: center;
             backdrop-filter: blur(15px);
-            box-shadow: 0 0 50px rgba(255, 215, 0, 0.5);
+            box-shadow: 0 0 50px ${rarityColor}80;
+            animation: treasureGlow 2s ease-in-out;
         `;
+        
         victoryDiv.innerHTML = `
-            🏆 TREASURE FOUND! 🏆<br>
-            <span style="font-size: 18px;">+1 Point Earned!</span><br>
-            <span style="font-size: 14px; font-weight: normal; opacity: 0.8;">Score: ${this.playerScore}</span><br>
-            <span style="font-size: 12px; font-weight: normal; margin-top: 10px; display: block;">You are brave to venture into the dangerous realm!</span>
+            <div style="font-size: 48px; margin-bottom: 15px;">${isWearable ? '🎭' : '🏆'}</div>
+            <div style="font-size: 28px; margin-bottom: 10px;">TREASURE FOUND!</div>
+            <div style="font-size: 32px; margin: 15px 0; color: ${rarityColor};">
+                ${loot?.icon || '💎'} ${loot?.name || 'Mystery Item'}
+            </div>
+            <div style="font-size: 14px; color: #ccc; margin-bottom: 10px; text-transform: uppercase;">
+                ${loot?.rarity || 'Common'} ${isWearable ? 'Wearable' : 'Item'}
+            </div>
+            <div style="font-size: 12px; color: #aaa; margin-bottom: 15px; font-style: italic;">
+                ${loot?.description || 'A mysterious treasure from the depths...'}
+            </div>
+            ${isWearable ? '<div style="font-size: 14px; color: #FFD700;">✨ Check your Bindle (I key) to equip! ✨</div>' : ''}
+            <div style="font-size: 16px; margin-top: 15px; color: #FFD700;">Score: ${this.playerScore}</div>
         `;
+        
+        // Add CSS animation
+        if (!document.querySelector('#treasure-glow-style')) {
+            const style = document.createElement('style');
+            style.id = 'treasure-glow-style';
+            style.textContent = `
+                @keyframes treasureGlow {
+                    0%, 100% { transform: translate(-50%, -50%) scale(1); }
+                    50% { transform: translate(-50%, -50%) scale(1.05); }
+                }
+            `;
+            document.head.appendChild(style);
+        }
         
         document.body.appendChild(victoryDiv);
         
@@ -589,7 +627,7 @@ export class RoguelikeWorld {
             if (document.body.contains(victoryDiv)) {
                 document.body.removeChild(victoryDiv);
             }
-        }, 4000);
+        }, 5000);
     }
     
     updateScoreDisplay() {
@@ -635,12 +673,33 @@ export class RoguelikeWorld {
     createGhost() {
         const ghostGroup = new THREE.Group();
         
+        // Random ghost type for variety
+        const ghostType = Math.random();
+        let color, emissiveColor, emissiveIntensity;
+        
+        if (ghostType < 0.3) {
+            // Wraith (blue-white)
+            color = 0xffffff;
+            emissiveColor = 0xaaaaff;
+            emissiveIntensity = 0.8;
+        } else if (ghostType < 0.6) {
+            // Specter (red)
+            color = 0xffaaaa;
+            emissiveColor = 0xff4444;
+            emissiveIntensity = 1.0;
+        } else {
+            // Shadow (dark purple)
+            color = 0xccaaff;
+            emissiveColor = 0x8844ff;
+            emissiveIntensity = 0.6;
+        }
+        
         // Ominous glowing orb - much more visible and threatening
         const orbGeometry = new THREE.SphereGeometry(1.2, 16, 12);
         const orbMaterial = new THREE.MeshBasicMaterial({ 
-            color: 0xffffff,
-            emissive: 0xaaaaff,
-            emissiveIntensity: 0.8,
+            color: color,
+            emissive: emissiveColor,
+            emissiveIntensity: emissiveIntensity,
             transparent: true,
             opacity: 0.9
         });
@@ -652,8 +711,8 @@ export class RoguelikeWorld {
         const coreGeometry = new THREE.SphereGeometry(0.6, 12, 8);
         const coreMaterial = new THREE.MeshBasicMaterial({ 
             color: 0xffffff,
-            emissive: 0xffffff,
-            emissiveIntensity: 1.2,
+            emissive: emissiveColor,
+            emissiveIntensity: emissiveIntensity * 1.5,
             transparent: true,
             opacity: 0.6
         });
@@ -664,7 +723,7 @@ export class RoguelikeWorld {
         // Glowing aura around the ghost
         const auraGeometry = new THREE.SphereGeometry(2, 12, 8);
         const auraMaterial = new THREE.MeshBasicMaterial({ 
-            color: 0x8888ff,
+            color: emissiveColor,
             transparent: true,
             opacity: 0.1,
             side: THREE.BackSide
@@ -673,11 +732,59 @@ export class RoguelikeWorld {
         aura.position.y = 2;
         ghostGroup.add(aura);
         
+        // Add creepy trailing particles
+        this.addGhostTrail(ghostGroup, emissiveColor);
+        
         // Add floating animation data
         ghostGroup.userData.floatOffset = Math.random() * Math.PI * 2;
         ghostGroup.userData.pulseOffset = Math.random() * Math.PI * 2;
+        ghostGroup.userData.ghostType = ghostType;
+        ghostGroup.userData.emissiveColor = emissiveColor;
         
         return ghostGroup;
+    }
+    
+    addGhostTrail(ghostGroup, color) {
+        // Create particle system for trailing effect
+        const particleCount = 20;
+        const particles = new THREE.BufferGeometry();
+        const positions = new Float32Array(particleCount * 3);
+        const colors = new Float32Array(particleCount * 3);
+        const sizes = new Float32Array(particleCount);
+        
+        for (let i = 0; i < particleCount; i++) {
+            positions[i * 3] = (Math.random() - 0.5) * 2;
+            positions[i * 3 + 1] = Math.random() * 2;
+            positions[i * 3 + 2] = (Math.random() - 0.5) * 2;
+            
+            const r = ((color >> 16) & 255) / 255;
+            const g = ((color >> 8) & 255) / 255;
+            const b = (color & 255) / 255;
+            
+            colors[i * 3] = r;
+            colors[i * 3 + 1] = g;
+            colors[i * 3 + 2] = b;
+            
+            sizes[i] = Math.random() * 0.5 + 0.1;
+        }
+        
+        particles.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        particles.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+        particles.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+        
+        const particleMaterial = new THREE.PointsMaterial({
+            size: 0.2,
+            transparent: true,
+            opacity: 0.6,
+            vertexColors: true,
+            blending: THREE.AdditiveBlending
+        });
+        
+        const particleSystem = new THREE.Points(particles, particleMaterial);
+        particleSystem.position.y = 2;
+        ghostGroup.add(particleSystem);
+        
+        ghostGroup.userData.particles = particleSystem;
     }
     
     getRandomFloorPosition() {
@@ -998,9 +1105,24 @@ export class RoguelikeWorld {
     }
     
     updateGhost(ghost, deltaTime, playerPosition) {
-        // Floating animation
         const time = Date.now() * 0.001;
+        
+        // Enhanced floating animation with pulsing
         ghost.mesh.position.y = 2 + Math.sin(time * 2 + ghost.mesh.userData.floatOffset) * 0.3;
+        
+        // Pulsing glow effect
+        const pulseIntensity = 0.5 + Math.sin(time * 3 + ghost.mesh.userData.pulseOffset) * 0.3;
+        ghost.mesh.children.forEach((child, index) => {
+            if (child.material && child.material.emissiveIntensity !== undefined) {
+                const baseIntensity = index === 0 ? 0.8 : (index === 1 ? 1.2 : 0.6);
+                child.material.emissiveIntensity = baseIntensity * pulseIntensity;
+            }
+        });
+        
+        // Update particle trail
+        if (ghost.mesh.userData.particles) {
+            this.updateGhostParticles(ghost.mesh.userData.particles, ghost.position, time);
+        }
         
         if (!playerPosition) return;
         
@@ -1012,39 +1134,132 @@ export class RoguelikeWorld {
             return;
         }
         
+        // Enhanced AI behavior based on ghost type
+        const ghostType = ghost.mesh.userData.ghostType;
+        
         // Check if player is in aggro range
         if (distanceToPlayer < ghost.aggroRange) {
-            // Chase player
+            // Different chase behaviors based on ghost type
+            if (ghostType < 0.3) {
+                // Wraith: Direct pursuit
+                this.updateWraithBehavior(ghost, playerPosition, time);
+            } else if (ghostType < 0.6) {
+                // Specter: Aggressive with sudden movements
+                this.updateSpecterBehavior(ghost, playerPosition, time);
+            } else {
+                // Shadow: Stalking behavior
+                this.updateShadowBehavior(ghost, playerPosition, time);
+            }
+            
+            // Play creepy sound effect occasionally
+            if (Math.random() < 0.01) {
+                this.playGhostSound(ghostType);
+            }
+        } else {
+            // Enhanced wandering with more unpredictable movement
+            this.updateGhostWandering(ghost, time);
+        }
+        
+        // Keep ghosts within bounds
+        this.constrainGhostToBounds(ghost);
+    }
+    
+    updateGhostParticles(particleSystem, ghostPosition, time) {
+        const positions = particleSystem.geometry.attributes.position.array;
+        
+        for (let i = 0; i < positions.length; i += 3) {
+            // Add some swirling motion to particles
+            const swirl = Math.sin(time + i * 0.1) * 0.02;
+            positions[i] += (Math.random() - 0.5) * 0.1 + swirl;
+            positions[i + 1] += (Math.random() - 0.5) * 0.05;
+            positions[i + 2] += (Math.random() - 0.5) * 0.1 - swirl;
+            
+            // Reset particles that drift too far
+            if (Math.abs(positions[i]) > 3 || Math.abs(positions[i + 2]) > 3) {
+                positions[i] = (Math.random() - 0.5) * 2;
+                positions[i + 2] = (Math.random() - 0.5) * 2;
+            }
+        }
+        
+        particleSystem.geometry.attributes.position.needsUpdate = true;
+    }
+    
+    updateWraithBehavior(ghost, playerPosition, time) {
+        // Direct, relentless pursuit
+        const direction = new THREE.Vector3();
+        direction.subVectors(playerPosition, ghost.position).normalize();
+        
+        ghost.position.addScaledVector(direction, ghost.speed);
+        ghost.mesh.position.copy(ghost.position);
+        ghost.mesh.lookAt(playerPosition);
+        
+        ghost.speed = Math.min(ghost.speed + 0.001, 0.08);
+    }
+    
+    updateSpecterBehavior(ghost, playerPosition, time) {
+        // Aggressive with sudden teleport-like movements
+        if (Math.random() < 0.05) { // 5% chance for sudden movement
+            const direction = new THREE.Vector3();
+            direction.subVectors(playerPosition, ghost.position).normalize();
+            
+            // Sudden jump forward
+            ghost.position.addScaledVector(direction, ghost.speed * 5);
+            ghost.mesh.position.copy(ghost.position);
+        } else {
+            // Normal pursuit
             const direction = new THREE.Vector3();
             direction.subVectors(playerPosition, ghost.position).normalize();
             
             ghost.position.addScaledVector(direction, ghost.speed);
             ghost.mesh.position.copy(ghost.position);
-            
-            // Make ghost look at player
-            ghost.mesh.lookAt(playerPosition);
-            
-            // Increase speed when chasing
-            ghost.speed = Math.min(ghost.speed + 0.001, 0.08);
-        } else {
-            // Random wandering
-            if (Math.random() < 0.02) { // 2% chance to change direction
-                const randomDirection = new THREE.Vector3(
-                    (Math.random() - 0.5) * 2,
-                    0,
-                    (Math.random() - 0.5) * 2
-                ).normalize();
-                
-                ghost.position.addScaledVector(randomDirection, ghost.speed * 0.5);
-                ghost.mesh.position.copy(ghost.position);
-            }
-            
-            // Slow down when not chasing
-            ghost.speed = Math.max(ghost.speed - 0.001, 0.01);
         }
         
-        // Keep ghosts within bounds
-        this.constrainGhostToBounds(ghost);
+        ghost.mesh.lookAt(playerPosition);
+        ghost.speed = Math.min(ghost.speed + 0.002, 0.1);
+    }
+    
+    updateShadowBehavior(ghost, playerPosition, time) {
+        // Stalking behavior - tries to stay behind player
+        const direction = new THREE.Vector3();
+        direction.subVectors(playerPosition, ghost.position);
+        
+        // Add some offset to try to get behind player
+        const sideOffset = new THREE.Vector3(
+            Math.sin(time * 0.5) * 2,
+            0,
+            Math.cos(time * 0.5) * 2
+        );
+        direction.add(sideOffset);
+        direction.normalize();
+        
+        ghost.position.addScaledVector(direction, ghost.speed * 0.7);
+        ghost.mesh.position.copy(ghost.position);
+        ghost.mesh.lookAt(playerPosition);
+        
+        ghost.speed = Math.min(ghost.speed + 0.0005, 0.06);
+    }
+    
+    updateGhostWandering(ghost, time) {
+        // More unpredictable wandering
+        if (Math.random() < 0.03) { // 3% chance to change direction
+            const randomDirection = new THREE.Vector3(
+                Math.sin(time * 0.1 + ghost.mesh.userData.floatOffset) + (Math.random() - 0.5),
+                0,
+                Math.cos(time * 0.1 + ghost.mesh.userData.floatOffset) + (Math.random() - 0.5)
+            ).normalize();
+            
+            ghost.position.addScaledVector(randomDirection, ghost.speed * 0.5);
+            ghost.mesh.position.copy(ghost.position);
+        }
+        
+        // Slow down when not chasing
+        ghost.speed = Math.max(ghost.speed - 0.001, 0.01);
+    }
+    
+    playGhostSound(ghostType) {
+        // Create audio context and play creepy sounds
+        // This is a placeholder - you could add actual audio files
+        console.log('👻 Ghost sound:', ghostType < 0.3 ? 'Wraith wail' : ghostType < 0.6 ? 'Specter scream' : 'Shadow whisper');
     }
     
     constrainGhostToBounds(ghost) {
@@ -1281,27 +1496,68 @@ export class RoguelikeWorld {
     
     generateTreasureLoot() {
         const lootTable = [
-            // Common items
+            // Consumables
             { type: 'consumable', name: 'Golden Tomato', icon: '🥇', description: 'A magical golden tomato with extra power', stackable: true, quantity: 3, rarity: 'uncommon' },
-            { type: 'equipment', name: 'Ghost Ward Ring', icon: '💍', description: 'Protects against ghost attacks', slot: 'accessory1', stats: { protection: +1 }, rarity: 'rare' },
-            { type: 'equipment', name: 'Spectral Boots', icon: '👻', description: 'Walk silently through the maze', slot: 'feet', stats: { stealth: +2, speed: +1 }, rarity: 'epic' },
-            { type: 'equipment', name: 'Treasure Hunter Hat', icon: '🎩', description: 'Increases treasure finding luck', slot: 'head', stats: { luck: +3 }, rarity: 'rare' },
-            { type: 'equipment', name: 'Phantom Cloak', icon: '🧥', description: 'Reduces ghost detection range', slot: 'chest', stats: { stealth: +3, protection: +1 }, rarity: 'epic' },
             { type: 'consumable', name: 'Courage Potion', icon: '🧪', description: 'Temporarily increases all stats', stackable: true, quantity: 1, rarity: 'rare' },
-            { type: 'equipment', name: 'Ancient Amulet', icon: '🔮', description: 'Mysterious powers from the pyramid', slot: 'accessory2', stats: { power: +2, luck: +1 }, rarity: 'legendary' }
+            
+            // Wearable Accessories
+            { type: 'wearable', name: 'Ghost Ward Ring', icon: '💍', description: 'Protects against ghost attacks', slot: 'finger', stats: { protection: +1 }, rarity: 'rare', model: 'ring_ghost_ward.glb' },
+            { type: 'wearable', name: 'Ancient Amulet', icon: '🔮', description: 'Mysterious powers from the pyramid', slot: 'neck', stats: { power: +2, luck: +1 }, rarity: 'legendary', model: 'amulet_ancient.glb' },
+            { type: 'wearable', name: 'Shadow Pendant', icon: '🌙', description: 'Grants stealth in darkness', slot: 'neck', stats: { stealth: +3 }, rarity: 'epic', model: 'pendant_shadow.glb' },
+            { type: 'wearable', name: 'Crystal Earrings', icon: '💎', description: 'Enhances magical abilities', slot: 'ear', stats: { magic: +2 }, rarity: 'rare', model: 'earrings_crystal.glb' },
+            
+            // Wearable Hats & Headgear
+            { type: 'wearable', name: 'Treasure Hunter Hat', icon: '🎩', description: 'Increases treasure finding luck', slot: 'head', stats: { luck: +3 }, rarity: 'rare', model: 'hat_treasure_hunter.glb' },
+            { type: 'wearable', name: 'Spectral Crown', icon: '👑', description: 'Crown of the ghost realm', slot: 'head', stats: { power: +3, protection: +2 }, rarity: 'legendary', model: 'crown_spectral.glb' },
+            { type: 'wearable', name: 'Phantom Mask', icon: '🎭', description: 'Conceals your identity from spirits', slot: 'face', stats: { stealth: +4 }, rarity: 'epic', model: 'mask_phantom.glb' },
+            { type: 'wearable', name: 'Mystic Goggles', icon: '🥽', description: 'See through ghostly illusions', slot: 'eyes', stats: { perception: +3 }, rarity: 'rare', model: 'goggles_mystic.glb' },
+            
+            // Wearable Clothing
+            { type: 'wearable', name: 'Phantom Cloak', icon: '🧥', description: 'Reduces ghost detection range', slot: 'back', stats: { stealth: +3, protection: +1 }, rarity: 'epic', model: 'cloak_phantom.glb' },
+            { type: 'wearable', name: 'Spirit Robe', icon: '👘', description: 'Flows like ethereal mist', slot: 'torso', stats: { magic: +2, stealth: +1 }, rarity: 'rare', model: 'robe_spirit.glb' },
+            { type: 'wearable', name: 'Wraith Gloves', icon: '🧤', description: 'Touch the spirit realm', slot: 'hands', stats: { magic: +3 }, rarity: 'epic', model: 'gloves_wraith.glb' },
+            
+            // Wearable Footwear
+            { type: 'wearable', name: 'Spectral Boots', icon: '👻', description: 'Walk silently through the maze', slot: 'feet', stats: { stealth: +2, speed: +1 }, rarity: 'epic', model: 'boots_spectral.glb' },
+            { type: 'wearable', name: 'Shadow Slippers', icon: '🥿', description: 'Leave no trace behind', slot: 'feet', stats: { stealth: +4 }, rarity: 'rare', model: 'slippers_shadow.glb' },
+            
+            // Ultra Rare Wearables
+            { type: 'wearable', name: 'Wings of the Void', icon: '🖤', description: 'Grants the power of flight', slot: 'back', stats: { flight: true, speed: +5 }, rarity: 'mythic', model: 'wings_void.glb' },
+            { type: 'wearable', name: 'Halo of Spirits', icon: '😇', description: 'Blessed by ancient souls', slot: 'head', stats: { protection: +5, magic: +3 }, rarity: 'mythic', model: 'halo_spirits.glb' },
+            { type: 'wearable', name: 'Demon Horns', icon: '😈', description: 'Channel dark powers', slot: 'head', stats: { power: +4, intimidation: +3 }, rarity: 'mythic', model: 'horns_demon.glb' }
         ];
         
-        // Random selection with rarity weighting
-        const rarityWeights = { common: 50, uncommon: 30, rare: 15, epic: 4, legendary: 1 };
-        const availableItems = lootTable.filter(item => {
+        // Enhanced rarity system with mythic tier
+        const rarityWeights = { 
+            common: 40, 
+            uncommon: 30, 
+            rare: 20, 
+            epic: 8, 
+            legendary: 1.8, 
+            mythic: 0.2 
+        };
+        
+        // Calculate weighted random selection
+        const totalWeight = Object.values(rarityWeights).reduce((sum, weight) => sum + weight, 0);
+        let random = Math.random() * totalWeight;
+        
+        for (const item of lootTable) {
             const weight = rarityWeights[item.rarity] || 1;
-            return Math.random() * 100 < weight;
-        });
+            random -= weight;
+            if (random <= 0) {
+                console.log('🎁 Generated treasure loot:', item.name, `(${item.rarity})`);
+                return { ...item, id: this.generateItemId() };
+            }
+        }
         
-        const selectedItem = availableItems[Math.floor(Math.random() * availableItems.length)] || lootTable[0];
-        
-        console.log('Generated treasure loot:', selectedItem.name, `(${selectedItem.rarity})`);
-        return selectedItem;
+        // Fallback to first item
+        const fallback = { ...lootTable[0], id: this.generateItemId() };
+        console.log('🎁 Generated treasure loot (fallback):', fallback.name, `(${fallback.rarity})`);
+        return fallback;
+    }
+    
+    generateItemId() {
+        return 'item_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     }
     
     dispose() {
