@@ -10,14 +10,20 @@ export class StreamManager {
         this.iceServers = [
             { urls: 'stun:stun.l.google.com:19302' },
             { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun2.l.google.com:19302' },
+            { urls: 'stun:stun3.l.google.com:19302' },
             { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
             { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
             { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
             { urls: 'turns:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
         ];
 
-        this.maxBitrate = 4_000_000;
+        this.maxBitrate = 2_500_000;
+        this.minBitrate = 500_000;
+        this.currentBitrate = 2_500_000;
         this.bitrateInterval = null;
+        this.statsInterval = null;
+        this.prevStats = new Map();
 
         this.setupSignaling();
     }
@@ -91,6 +97,8 @@ export class StreamManager {
                 });
             }
 
+            this.startStatsMonitoring();
+
             return true;
         } catch (error) {
             console.error('Failed to start hosting:', error);
@@ -108,12 +116,18 @@ export class StreamManager {
             clearInterval(this.bitrateInterval);
             this.bitrateInterval = null;
         }
+        if (this.statsInterval) {
+            clearInterval(this.statsInterval);
+            this.statsInterval = null;
+        }
+        this.prevStats.clear();
 
         this.peerConnections.forEach(pc => pc.close());
         this.peerConnections.clear();
         this.pendingCandidates.clear();
 
         this.isHost = false;
+        this.currentBitrate = this.maxBitrate;
         this.theatre.stopHostStream();
 
         const socket = this.networkManager?.socket;
@@ -172,20 +186,21 @@ export class StreamManager {
     async configureVideoSender(sender) {
         if (!sender || sender.track?.kind !== 'video') return;
 
-        await new Promise(r => setTimeout(r, 800));
+        await new Promise(r => setTimeout(r, 500));
 
         try {
             const params = sender.getParameters();
             if (!params.encodings?.length) params.encodings = [{}];
 
-            params.encodings[0].maxBitrate = this.maxBitrate;
+            params.encodings[0].maxBitrate = this.currentBitrate;
             params.encodings[0].maxFramerate = 30;
             params.encodings[0].networkPriority = 'high';
             params.encodings[0].priority = 'high';
-            params.degradationPreference = 'balanced';
+            params.encodings[0].scaleResolutionDownBy = 1.0;
+            params.degradationPreference = 'maintain-framerate';
 
             await sender.setParameters(params);
-            console.log('Sender configured:', this.maxBitrate / 1e6, 'Mbps max');
+            console.log('Sender configured:', this.currentBitrate / 1e6, 'Mbps max');
         } catch (e) {
             console.warn('Could not set sender params:', e.message);
         }
@@ -296,6 +311,8 @@ export class StreamManager {
             iceTransportPolicy: 'all'
         });
 
+        pc._iceRestartPending = false;
+
         pc.onicecandidate = (event) => {
             if (event.candidate) {
                 this.networkManager?.socket?.emit('stream-ice-candidate', {
@@ -314,20 +331,24 @@ export class StreamManager {
             const state = pc.iceConnectionState;
             console.log(`ICE [${userId.slice(-4)}]: ${state}`);
 
-            if (state === 'disconnected') {
-                if (this.isHost) {
-                    setTimeout(() => {
-                        if (pc.iceConnectionState === 'disconnected') {
-                            this.iceRestart(userId);
-                        }
-                    }, 3000);
-                }
+            if (state === 'connected' || state === 'completed') {
+                pc._iceRestartPending = false;
             }
 
-            if (state === 'failed') {
-                if (this.isHost) {
-                    this.iceRestart(userId);
-                }
+            if (state === 'disconnected' && this.isHost && !pc._iceRestartPending) {
+                pc._iceRestartPending = true;
+                setTimeout(() => {
+                    if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
+                        this.iceRestart(userId);
+                    } else {
+                        pc._iceRestartPending = false;
+                    }
+                }, 2000);
+            }
+
+            if (state === 'failed' && this.isHost && !pc._iceRestartPending) {
+                pc._iceRestartPending = true;
+                this.iceRestart(userId);
             }
         };
 
@@ -337,16 +358,96 @@ export class StreamManager {
                 console.log(`Stream live with ${userId.slice(-4)}`);
             }
             if (state === 'failed') {
-                console.warn(`Peer ${userId.slice(-4)} connection failed`);
+                console.warn(`Peer ${userId.slice(-4)} connection failed, full reconnect`);
                 this.closePeerConnection(userId);
                 if (this.isHost && this.hostStream) {
-                    setTimeout(() => this.sendOfferToViewer(userId), 2000);
+                    setTimeout(() => this.sendOfferToViewer(userId), 1500);
                 }
             }
         };
 
         this.peerConnections.set(userId, pc);
         return pc;
+    }
+
+    startStatsMonitoring() {
+        if (this.statsInterval) clearInterval(this.statsInterval);
+
+        this.statsInterval = setInterval(() => {
+            this.peerConnections.forEach((pc, userId) => {
+                if (pc.connectionState !== 'connected') return;
+                this.collectStats(pc, userId);
+            });
+        }, 3000);
+    }
+
+    async collectStats(pc, userId) {
+        try {
+            const stats = await pc.getStats();
+            let bytesSent = 0;
+            let packetsSent = 0;
+            let packetsLost = 0;
+            let roundTripTime = 0;
+            let framesPerSecond = 0;
+
+            stats.forEach(report => {
+                if (report.type === 'outbound-rtp' && report.kind === 'video') {
+                    bytesSent = report.bytesSent || 0;
+                    packetsSent = report.packetsSent || 0;
+                    framesPerSecond = report.framesPerSecond || 0;
+                }
+                if (report.type === 'remote-inbound-rtp' && report.kind === 'video') {
+                    packetsLost = report.packetsLost || 0;
+                    roundTripTime = report.roundTripTime || 0;
+                }
+            });
+
+            const prev = this.prevStats.get(userId);
+            if (prev) {
+                const deltaBytes = bytesSent - prev.bytesSent;
+                const deltaPackets = packetsSent - prev.packetsSent;
+                const deltaLost = packetsLost - prev.packetsLost;
+                const elapsed = 3;
+
+                const actualBitrate = (deltaBytes * 8) / elapsed;
+                const lossRate = deltaPackets > 0 ? deltaLost / deltaPackets : 0;
+
+                if (lossRate > 0.05 || roundTripTime > 0.3) {
+                    this.adjustBitrate(-1, lossRate, roundTripTime);
+                } else if (lossRate < 0.01 && roundTripTime < 0.15 && this.currentBitrate < this.maxBitrate) {
+                    this.adjustBitrate(1, lossRate, roundTripTime);
+                }
+
+                if (framesPerSecond > 0 || actualBitrate > 0) {
+                    console.log(`Stream [${userId.slice(-4)}]: ${(actualBitrate / 1e6).toFixed(1)}Mbps actual, ${framesPerSecond}fps, loss:${(lossRate * 100).toFixed(1)}%, rtt:${(roundTripTime * 1000).toFixed(0)}ms`);
+                }
+            }
+
+            this.prevStats.set(userId, { bytesSent, packetsSent, packetsLost });
+        } catch (e) { /* stats collection failed */ }
+    }
+
+    adjustBitrate(direction, lossRate, rtt) {
+        const step = 250_000;
+        if (direction < 0) {
+            this.currentBitrate = Math.max(this.minBitrate, this.currentBitrate - step * 2);
+        } else {
+            this.currentBitrate = Math.min(this.maxBitrate, this.currentBitrate + step);
+        }
+
+        this.peerConnections.forEach(pc => {
+            pc.getSenders().forEach(sender => {
+                if (sender.track?.kind === 'video') {
+                    try {
+                        const params = sender.getParameters();
+                        if (params.encodings?.length) {
+                            params.encodings[0].maxBitrate = this.currentBitrate;
+                            sender.setParameters(params).catch(() => {});
+                        }
+                    } catch (e) { /* ignore */ }
+                }
+            });
+        });
     }
 
     closePeerConnection(userId) {
@@ -360,5 +461,10 @@ export class StreamManager {
 
     dispose() {
         this.stopHosting();
+        if (this.statsInterval) {
+            clearInterval(this.statsInterval);
+            this.statsInterval = null;
+        }
+        this.prevStats.clear();
     }
 }

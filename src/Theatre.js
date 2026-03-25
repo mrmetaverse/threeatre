@@ -475,6 +475,14 @@ export class Theatre {
             this.hostVideo.remove();
         }
         this.removeUnmuteOverlay();
+        if (this.syncInterval) {
+            clearInterval(this.syncInterval);
+            this.syncInterval = null;
+        }
+        if (this._vfcHandle && this.hostVideo) {
+            this.hostVideo.cancelVideoFrameCallback(this._vfcHandle);
+        }
+        this._vfcHandle = null;
 
         const video = document.createElement('video');
         this.hostVideo = video;
@@ -487,7 +495,7 @@ export class Theatre {
         video.muted = true;
         video.volume = 1.0;
 
-        video.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;';
+        video.style.cssText = 'position:fixed;bottom:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;';
         document.body.appendChild(video);
         video.srcObject = stream;
 
@@ -508,6 +516,16 @@ export class Theatre {
             this.videoTexture.magFilter = THREE.LinearFilter;
             this.videoTexture.generateMipmaps = false;
             this.videoTexture.colorSpace = THREE.SRGBColorSpace;
+            this.videoTexture.format = THREE.RGBAFormat;
+
+            if ('requestVideoFrameCallback' in video) {
+                const onFrame = () => {
+                    if (!this.hostVideo || this.hostVideo !== video) return;
+                    this.videoTexture.needsUpdate = true;
+                    this._vfcHandle = video.requestVideoFrameCallback(onFrame);
+                };
+                this._vfcHandle = video.requestVideoFrameCallback(onFrame);
+            }
 
             this.screen.material.dispose();
             this.screen.material = new THREE.MeshBasicMaterial({
@@ -527,7 +545,11 @@ export class Theatre {
 
         if (!isLocalHost) {
             video.addEventListener('stalled', () => {
-                setTimeout(() => { if (video.paused) video.play().catch(() => {}); }, 500);
+                setTimeout(() => { if (video.paused) video.play().catch(() => {}); }, 300);
+            });
+
+            video.addEventListener('waiting', () => {
+                setTimeout(() => { if (video.paused) video.play().catch(() => {}); }, 200);
             });
 
             this.syncInterval = setInterval(() => {
@@ -535,11 +557,15 @@ export class Theatre {
                 try {
                     const end = video.buffered.end(video.buffered.length - 1);
                     const lag = end - video.currentTime;
-                    if (lag > 0.8) {
-                        video.currentTime = end - 0.05;
+                    if (lag > 1.5) {
+                        video.currentTime = end - 0.1;
+                    } else if (lag > 0.5) {
+                        video.playbackRate = 1.05;
+                    } else {
+                        video.playbackRate = 1.0;
                     }
                 } catch (e) { /* buffered range empty */ }
-            }, 2000);
+            }, 500);
         }
 
         stream.getTracks().forEach(track => {
@@ -607,10 +633,16 @@ export class Theatre {
             this.syncInterval = null;
         }
 
+        if (this._vfcHandle && this.hostVideo && 'cancelVideoFrameCallback' in this.hostVideo) {
+            this.hostVideo.cancelVideoFrameCallback(this._vfcHandle);
+        }
+        this._vfcHandle = null;
+
         this.removeUnmuteOverlay();
 
         if (this.hostVideo) {
             this.hostVideo.pause();
+            this.hostVideo.playbackRate = 1.0;
             if (this.hostVideo.srcObject) {
                 this.hostVideo.srcObject.getTracks().forEach(track => track.stop());
             }
@@ -801,8 +833,11 @@ export class Theatre {
     }
     
     update(deltaTime = 0.016) {
-        // Update video texture if playing
-        if (this.videoTexture && this.hostVideo && this.hostVideo.readyState >= 2) {
+        // VideoTexture auto-updates via requestVideoFrameCallback or internal check;
+        // forcing needsUpdate every frame causes redundant GPU uploads and stutter.
+        // Fallback for browsers without requestVideoFrameCallback:
+        if (this.videoTexture && this.hostVideo && !this._vfcHandle
+            && this.hostVideo.readyState >= 2) {
             this.videoTexture.needsUpdate = true;
         }
         
