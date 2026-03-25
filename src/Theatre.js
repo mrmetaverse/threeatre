@@ -468,58 +468,57 @@ export class Theatre {
         }, { once: true });
     }
     
-    setHostStream(stream) {
+    setHostStream(stream, isLocalHost = false) {
         if (this.hostVideo) {
             this.hostVideo.srcObject = null;
         }
-        
+
         this.hostVideo = document.createElement('video');
         this.hostVideo.srcObject = stream;
         this.hostVideo.autoplay = true;
-        this.hostVideo.muted = true;
         this.hostVideo.playsInline = true;
-        
-        // Wait for video to load before creating texture
+        this.hostVideo.muted = isLocalHost;
+
+        if (!isLocalHost && stream.getAudioTracks().length > 0) {
+            this.hostVideo.volume = 1.0;
+        }
+
         this.hostVideo.addEventListener('loadedmetadata', () => {
             const videoWidth = this.hostVideo.videoWidth;
             const videoHeight = this.hostVideo.videoHeight;
             const aspectRatio = videoWidth / videoHeight;
-            
-            console.log('Video loaded, dimensions:', videoWidth, 'x', videoHeight, 'aspect:', aspectRatio);
-            
-            // Adjust screen size to match content aspect ratio
+
+            console.log('Stream loaded:', videoWidth, 'x', videoHeight, '@', aspectRatio.toFixed(2));
+
             this.adjustScreenToContent(aspectRatio);
-            
-            // Create video texture
+
+            if (this.videoTexture) this.videoTexture.dispose();
+
             this.videoTexture = new THREE.VideoTexture(this.hostVideo);
             this.videoTexture.minFilter = THREE.LinearFilter;
             this.videoTexture.magFilter = THREE.LinearFilter;
-            this.videoTexture.format = THREE.RGBAFormat;
-            this.videoTexture.flipY = true; // Fix upside-down display
-            
-            // Update screen material
-            this.screen.material.dispose(); // Clean up old material
+            this.videoTexture.generateMipmaps = false;
+            this.videoTexture.colorSpace = THREE.SRGBColorSpace;
+
+            this.screen.material.dispose();
             this.screen.material = new THREE.MeshBasicMaterial({
                 map: this.videoTexture,
-                side: THREE.DoubleSide
+                side: THREE.DoubleSide,
+                toneMapped: false
             });
-            
-            console.log('Video texture applied to screen with aspect ratio:', aspectRatio);
         });
-        
+
         this.hostVideo.addEventListener('canplay', () => {
-            console.log('Video can play');
             this.hostVideo.play().catch(e => console.error('Error playing video:', e));
         });
-        
-        // Handle stream end
+
         stream.getTracks().forEach(track => {
             track.addEventListener('ended', () => {
                 this.stopHostStream();
             });
         });
-        
-        console.log('Host stream set on theatre screen');
+
+        console.log('Host stream set on theatre screen (local:', isLocalHost, ')');
     }
     
     adjustScreenToContent(aspectRatio) {

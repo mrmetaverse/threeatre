@@ -10,8 +10,13 @@ export class StreamManager {
             { urls: 'stun:stun.l.google.com:19302' },
             { urls: 'stun:stun1.l.google.com:19302' },
             { urls: 'stun:stun2.l.google.com:19302' },
-            { urls: 'stun:stun3.l.google.com:19302' }
+            { urls: 'stun:stun3.l.google.com:19302' },
+            { urls: 'stun:stun4.l.google.com:19302' }
         ];
+
+        this.targetBitrate = 6_000_000;
+        this.maxBitrate = 10_000_000;
+        this.bitrateInterval = null;
 
         this.setupSignaling();
     }
@@ -42,15 +47,53 @@ export class StreamManager {
             this.hostStream = await navigator.mediaDevices.getDisplayMedia({
                 video: {
                     cursor: 'always',
-                    displaySurface: 'monitor'
+                    displaySurface: 'monitor',
+                    width: { ideal: 1920, max: 2560 },
+                    height: { ideal: 1080, max: 1440 },
+                    frameRate: { ideal: 30, max: 60 }
                 },
-                audio: true
+                audio: {
+                    echoCancellation: false,
+                    noiseSuppression: false,
+                    autoGainControl: false,
+                    sampleRate: 48000,
+                    channelCount: 2
+                },
+                preferCurrentTab: false,
+                selfBrowserSurface: 'exclude',
+                systemAudio: 'include'
             });
 
-            this.isHost = true;
-            this.theatre.setHostStream(this.hostStream);
+            const videoTrack = this.hostStream.getVideoTracks()[0];
+            if (videoTrack) {
+                const capabilities = videoTrack.getCapabilities?.();
+                const settings = videoTrack.getSettings();
+                console.log('Capture resolution:', settings.width, 'x', settings.height, '@', settings.frameRate, 'fps');
 
-            this.hostStream.getVideoTracks()[0].addEventListener('ended', () => {
+                if (capabilities?.width?.max >= 1920) {
+                    try {
+                        await videoTrack.applyConstraints({
+                            width: { ideal: 1920 },
+                            height: { ideal: 1080 },
+                            frameRate: { ideal: 30, max: 60 }
+                        });
+                    } catch (e) {
+                        console.warn('Could not apply higher constraints:', e);
+                    }
+                }
+
+                videoTrack.contentHint = 'detail';
+            }
+
+            const audioTrack = this.hostStream.getAudioTracks()[0];
+            if (audioTrack) {
+                audioTrack.contentHint = 'music';
+            }
+
+            this.isHost = true;
+            this.theatre.setHostStream(this.hostStream, true);
+
+            videoTrack?.addEventListener('ended', () => {
                 this.stopHosting();
             });
 
@@ -75,9 +118,12 @@ export class StreamManager {
             this.hostStream = null;
         }
 
-        this.peerConnections.forEach((pc, userId) => {
-            pc.close();
-        });
+        if (this.bitrateInterval) {
+            clearInterval(this.bitrateInterval);
+            this.bitrateInterval = null;
+        }
+
+        this.peerConnections.forEach((pc) => pc.close());
         this.peerConnections.clear();
         this.pendingCandidates.clear();
 
@@ -86,9 +132,7 @@ export class StreamManager {
 
         const socket = this.networkManager?.socket;
         if (socket && this.networkManager.isConnected) {
-            socket.emit('stop-stream', {
-                roomId: this.networkManager.roomId
-            });
+            socket.emit('stop-stream', { roomId: this.networkManager.roomId });
         }
     }
 
@@ -99,23 +143,73 @@ export class StreamManager {
             const pc = this.createPeerConnection(viewerId);
 
             this.hostStream.getTracks().forEach(track => {
-                pc.addTrack(track, this.hostStream);
+                const sender = pc.addTrack(track, this.hostStream);
+                if (track.kind === 'video') {
+                    this.configureVideoSender(sender);
+                }
             });
 
             const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
+            const boostedSdp = this.boostSdpBitrate(offer.sdp);
+            await pc.setLocalDescription({ type: offer.type, sdp: boostedSdp });
 
             const socket = this.networkManager?.socket;
             if (socket) {
                 socket.emit('stream-offer', {
                     roomId: this.networkManager.roomId,
                     targetUserId: viewerId,
-                    offer: { type: offer.type, sdp: offer.sdp }
+                    offer: { type: offer.type, sdp: boostedSdp }
                 });
             }
         } catch (error) {
             console.error('Failed to create offer for viewer:', viewerId, error);
         }
+    }
+
+    async configureVideoSender(sender) {
+        if (!sender || sender.track?.kind !== 'video') return;
+
+        await new Promise(r => setTimeout(r, 500));
+
+        try {
+            const params = sender.getParameters();
+            if (!params.encodings || params.encodings.length === 0) {
+                params.encodings = [{}];
+            }
+
+            params.encodings[0].maxBitrate = this.maxBitrate;
+            params.encodings[0].maxFramerate = 60;
+            params.encodings[0].networkPriority = 'high';
+            params.encodings[0].priority = 'high';
+
+            if (params.encodings[0].scaleResolutionDownBy !== undefined) {
+                params.encodings[0].scaleResolutionDownBy = 1.0;
+            }
+
+            params.degradationPreference = 'maintain-resolution';
+
+            await sender.setParameters(params);
+            console.log('Video sender configured: maxBitrate', this.maxBitrate / 1e6, 'Mbps');
+        } catch (e) {
+            console.warn('Could not configure sender params:', e);
+        }
+    }
+
+    boostSdpBitrate(sdp) {
+        const bitrateKbps = Math.floor(this.maxBitrate / 1000);
+
+        sdp = sdp.replace(/b=AS:\d+/g, `b=AS:${bitrateKbps}`);
+
+        if (!sdp.includes('b=AS:')) {
+            sdp = sdp.replace(/(m=video.*\r\n)/g, `$1b=AS:${bitrateKbps}\r\n`);
+        }
+
+        sdp = sdp.replace(/b=TIAS:\d+/g, `b=TIAS:${this.maxBitrate}`);
+        if (!sdp.includes('b=TIAS:')) {
+            sdp = sdp.replace(/(m=video.*\r\n)/g, `$1b=TIAS:${this.maxBitrate}\r\n`);
+        }
+
+        return sdp;
     }
 
     async handleStreamOffer(data) {
@@ -127,7 +221,7 @@ export class StreamManager {
             pc.ontrack = (event) => {
                 const remoteStream = event.streams[0];
                 if (remoteStream) {
-                    this.theatre.setHostStream(remoteStream);
+                    this.theatre.setHostStream(remoteStream, false);
                     console.log('Receiving host stream via WebRTC');
                 }
             };
@@ -171,10 +265,38 @@ export class StreamManager {
                     }
                     this.pendingCandidates.delete(fromUserId);
                 }
+
+                this.startBitrateMonitoring(pc, fromUserId);
             } catch (error) {
                 console.error('Failed to handle stream answer:', error);
             }
         }
+    }
+
+    startBitrateMonitoring(pc, userId) {
+        if (this.bitrateInterval) clearInterval(this.bitrateInterval);
+
+        let lastBytesSent = 0;
+        let lastTimestamp = Date.now();
+
+        this.bitrateInterval = setInterval(async () => {
+            try {
+                const stats = await pc.getStats();
+                stats.forEach(report => {
+                    if (report.type === 'outbound-rtp' && report.kind === 'video') {
+                        const now = Date.now();
+                        const elapsed = (now - lastTimestamp) / 1000;
+                        if (elapsed > 0 && lastBytesSent > 0) {
+                            const bitrate = ((report.bytesSent - lastBytesSent) * 8) / elapsed;
+                            const mbps = (bitrate / 1e6).toFixed(2);
+                            console.log(`Stream bitrate: ${mbps} Mbps | ${report.framesPerSecond || '?'} fps | ${report.frameWidth}x${report.frameHeight}`);
+                        }
+                        lastBytesSent = report.bytesSent;
+                        lastTimestamp = now;
+                    }
+                });
+            } catch (e) { /* stats unavailable */ }
+        }, 5000);
     }
 
     async handleIceCandidate(data) {
@@ -213,7 +335,12 @@ export class StreamManager {
             this.peerConnections.get(userId).close();
         }
 
-        const pc = new RTCPeerConnection({ iceServers: this.iceServers });
+        const pc = new RTCPeerConnection({
+            iceServers: this.iceServers,
+            iceCandidatePoolSize: 10,
+            bundlePolicy: 'max-bundle',
+            rtcpMuxPolicy: 'require'
+        });
 
         pc.onicecandidate = (event) => {
             if (event.candidate) {
@@ -233,12 +360,23 @@ export class StreamManager {
         };
 
         pc.onconnectionstatechange = () => {
-            if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
-                console.warn(`Peer connection ${userId} state: ${pc.connectionState}`);
+            const state = pc.connectionState;
+            if (state === 'failed') {
+                console.warn(`Peer ${userId} failed, attempting reconnect...`);
                 this.closePeerConnection(userId);
+                if (this.isHost && this.hostStream) {
+                    setTimeout(() => this.sendOfferToViewer(userId), 2000);
+                }
             }
-            if (pc.connectionState === 'connected') {
-                console.log(`Stream connection established with ${userId}`);
+            if (state === 'disconnected') {
+                setTimeout(() => {
+                    if (pc.connectionState === 'disconnected') {
+                        this.closePeerConnection(userId);
+                    }
+                }, 5000);
+            }
+            if (state === 'connected') {
+                console.log(`Stream connected with ${userId}`);
             }
         };
 
