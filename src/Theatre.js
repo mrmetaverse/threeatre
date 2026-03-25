@@ -470,31 +470,42 @@ export class Theatre {
     
     setHostStream(stream, isLocalHost = false) {
         if (this.hostVideo) {
+            this.hostVideo.pause();
             this.hostVideo.srcObject = null;
+            this.hostVideo.remove();
         }
 
-        this.hostVideo = document.createElement('video');
-        this.hostVideo.srcObject = stream;
-        this.hostVideo.autoplay = true;
-        this.hostVideo.playsInline = true;
-        this.hostVideo.muted = isLocalHost;
+        const video = document.createElement('video');
+        this.hostVideo = video;
 
-        if (!isLocalHost && stream.getAudioTracks().length > 0) {
-            this.hostVideo.volume = 1.0;
+        video.autoplay = true;
+        video.playsInline = true;
+        video.disablePictureInPicture = true;
+        video.preload = 'auto';
+
+        if (isLocalHost) {
+            video.muted = true;
+        } else {
+            video.muted = false;
+            video.volume = 1.0;
         }
 
-        this.hostVideo.addEventListener('loadedmetadata', () => {
-            const videoWidth = this.hostVideo.videoWidth;
-            const videoHeight = this.hostVideo.videoHeight;
-            const aspectRatio = videoWidth / videoHeight;
+        video.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;';
+        document.body.appendChild(video);
 
-            console.log('Stream loaded:', videoWidth, 'x', videoHeight, '@', aspectRatio.toFixed(2));
+        video.srcObject = stream;
 
-            this.adjustScreenToContent(aspectRatio);
+        video.addEventListener('loadedmetadata', () => {
+            const w = video.videoWidth;
+            const h = video.videoHeight;
+            const ar = w / h;
+            console.log('Stream loaded:', w, 'x', h, '| A/V tracks:', stream.getVideoTracks().length, '/', stream.getAudioTracks().length);
+
+            this.adjustScreenToContent(ar);
 
             if (this.videoTexture) this.videoTexture.dispose();
 
-            this.videoTexture = new THREE.VideoTexture(this.hostVideo);
+            this.videoTexture = new THREE.VideoTexture(video);
             this.videoTexture.minFilter = THREE.LinearFilter;
             this.videoTexture.magFilter = THREE.LinearFilter;
             this.videoTexture.generateMipmaps = false;
@@ -508,17 +519,37 @@ export class Theatre {
             });
         });
 
-        this.hostVideo.addEventListener('canplay', () => {
-            this.hostVideo.play().catch(e => console.error('Error playing video:', e));
+        video.addEventListener('canplay', () => {
+            video.play().catch(e => console.error('Error playing video:', e));
         });
+
+        if (!isLocalHost) {
+            video.addEventListener('waiting', () => {
+                console.warn('Stream buffering...');
+            });
+            video.addEventListener('stalled', () => {
+                console.warn('Stream stalled, attempting recovery...');
+                setTimeout(() => {
+                    if (video.paused) video.play().catch(() => {});
+                }, 500);
+            });
+
+            this.syncInterval = setInterval(() => {
+                if (!video || video.paused || !video.buffered.length) return;
+                const bufferedEnd = video.buffered.end(video.buffered.length - 1);
+                const lag = bufferedEnd - video.currentTime;
+                if (lag > 0.5) {
+                    video.currentTime = bufferedEnd - 0.05;
+                    console.log('A/V sync: jumped ahead', lag.toFixed(2), 's');
+                }
+            }, 3000);
+        }
 
         stream.getTracks().forEach(track => {
-            track.addEventListener('ended', () => {
-                this.stopHostStream();
-            });
+            track.addEventListener('ended', () => this.stopHostStream());
         });
 
-        console.log('Host stream set on theatre screen (local:', isLocalHost, ')');
+        console.log('Host stream set (local:', isLocalHost, ', audio:', stream.getAudioTracks().length > 0, ')');
     }
     
     adjustScreenToContent(aspectRatio) {
@@ -546,25 +577,34 @@ export class Theatre {
     }
     
     stopHostStream() {
+        if (this.syncInterval) {
+            clearInterval(this.syncInterval);
+            this.syncInterval = null;
+        }
+
         if (this.hostVideo) {
+            this.hostVideo.pause();
             if (this.hostVideo.srcObject) {
                 this.hostVideo.srcObject.getTracks().forEach(track => track.stop());
             }
             this.hostVideo.srcObject = null;
+            this.hostVideo.remove();
             this.hostVideo = null;
         }
-        
+
         if (this.videoTexture) {
             this.videoTexture.dispose();
             this.videoTexture = null;
         }
-        
-        // Reset screen to black
-        this.screen.material = new THREE.MeshBasicMaterial({ 
-            color: 0x000000,
-            side: THREE.DoubleSide 
-        });
-        
+
+        if (this.screen) {
+            this.screen.material.dispose();
+            this.screen.material = new THREE.MeshBasicMaterial({
+                color: 0x000000,
+                side: THREE.DoubleSide
+            });
+        }
+
         console.log('Host stream stopped');
     }
     
