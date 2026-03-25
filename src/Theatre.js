@@ -469,20 +469,7 @@ export class Theatre {
     }
     
     setHostStream(stream, isLocalHost = false) {
-        if (this.hostVideo) {
-            this.hostVideo.pause();
-            this.hostVideo.srcObject = null;
-            this.hostVideo.remove();
-        }
-        this.removeUnmuteOverlay();
-        if (this.syncInterval) {
-            clearInterval(this.syncInterval);
-            this.syncInterval = null;
-        }
-        if (this._vfcHandle && this.hostVideo) {
-            this.hostVideo.cancelVideoFrameCallback(this._vfcHandle);
-        }
-        this._vfcHandle = null;
+        this.stopHostStream();
 
         const video = document.createElement('video');
         this.hostVideo = video;
@@ -490,8 +477,6 @@ export class Theatre {
         video.autoplay = true;
         video.playsInline = true;
         video.disablePictureInPicture = true;
-        video.preload = 'auto';
-
         video.muted = true;
         video.volume = 1.0;
 
@@ -511,21 +496,19 @@ export class Theatre {
 
             if (this.videoTexture) this.videoTexture.dispose();
 
-            this.videoTexture = new THREE.VideoTexture(video);
+            const texW = Math.min(w, 1280);
+            const texH = Math.round(texW / ar);
+
+            this._streamCanvas = document.createElement('canvas');
+            this._streamCanvas.width = texW;
+            this._streamCanvas.height = texH;
+            this._streamCtx = this._streamCanvas.getContext('2d', { alpha: false, willReadFrequently: false });
+
+            this.videoTexture = new THREE.CanvasTexture(this._streamCanvas);
             this.videoTexture.minFilter = THREE.LinearFilter;
             this.videoTexture.magFilter = THREE.LinearFilter;
             this.videoTexture.generateMipmaps = false;
             this.videoTexture.colorSpace = THREE.SRGBColorSpace;
-            this.videoTexture.format = THREE.RGBAFormat;
-
-            if ('requestVideoFrameCallback' in video) {
-                const onFrame = () => {
-                    if (!this.hostVideo || this.hostVideo !== video) return;
-                    this.videoTexture.needsUpdate = true;
-                    this._vfcHandle = video.requestVideoFrameCallback(onFrame);
-                };
-                this._vfcHandle = video.requestVideoFrameCallback(onFrame);
-            }
 
             this.screen.material.dispose();
             this.screen.material = new THREE.MeshBasicMaterial({
@@ -533,6 +516,8 @@ export class Theatre {
                 side: THREE.DoubleSide,
                 toneMapped: false
             });
+
+            console.log('Stream texture:', texW, 'x', texH, '(canvas-based)');
 
             if (!isLocalHost && hasAudio) {
                 this.showUnmuteOverlay(video);
@@ -547,7 +532,6 @@ export class Theatre {
             video.addEventListener('stalled', () => {
                 setTimeout(() => { if (video.paused) video.play().catch(() => {}); }, 300);
             });
-
             video.addEventListener('waiting', () => {
                 setTimeout(() => { if (video.paused) video.play().catch(() => {}); }, 200);
             });
@@ -559,12 +543,12 @@ export class Theatre {
                     const lag = end - video.currentTime;
                     if (lag > 1.5) {
                         video.currentTime = end - 0.1;
-                    } else if (lag > 0.5) {
+                    } else if (lag > 0.4) {
                         video.playbackRate = 1.05;
                     } else {
                         video.playbackRate = 1.0;
                     }
-                } catch (e) { /* buffered range empty */ }
+                } catch (e) { /* empty */ }
             }, 500);
         }
 
@@ -633,12 +617,10 @@ export class Theatre {
             this.syncInterval = null;
         }
 
-        if (this._vfcHandle && this.hostVideo && 'cancelVideoFrameCallback' in this.hostVideo) {
-            this.hostVideo.cancelVideoFrameCallback(this._vfcHandle);
-        }
-        this._vfcHandle = null;
-
         this.removeUnmuteOverlay();
+
+        this._streamCanvas = null;
+        this._streamCtx = null;
 
         if (this.hostVideo) {
             this.hostVideo.pause();
@@ -833,11 +815,9 @@ export class Theatre {
     }
     
     update(deltaTime = 0.016) {
-        // VideoTexture auto-updates via requestVideoFrameCallback or internal check;
-        // forcing needsUpdate every frame causes redundant GPU uploads and stutter.
-        // Fallback for browsers without requestVideoFrameCallback:
-        if (this.videoTexture && this.hostVideo && !this._vfcHandle
-            && this.hostVideo.readyState >= 2) {
+        if (this._streamCtx && this.hostVideo && this.hostVideo.readyState >= 2) {
+            this._streamCtx.drawImage(this.hostVideo, 0, 0,
+                this._streamCanvas.width, this._streamCanvas.height);
             this.videoTexture.needsUpdate = true;
         }
         
