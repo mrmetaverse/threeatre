@@ -61,6 +61,14 @@ class TheatreApp {
         this.isDragging = false;
         this.lastMouseX = 0;
         this.lastMouseY = 0;
+        this.isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.matchMedia('(pointer: coarse)').matches;
+        this.mobileLookSensitivity = 2.4;
+        this.mobileInput = {
+            enabled: false,
+            move: { x: 0, y: 0 },
+            look: { x: 0, y: 0 }
+        };
+        this.mobileJoystickElements = null;
         
         this.init();
         this.setupEventListeners();
@@ -144,6 +152,7 @@ class TheatreApp {
         this.applyCameraRotation();
         
         this.createPlayerAvatar();
+        this.setupMobileControls();
     }
     
     async initRenderer() {
@@ -900,6 +909,154 @@ class TheatreApp {
             event.preventDefault();
         }, { passive: false });
     }
+
+    setupMobileControls() {
+        if (!this.isMobile) return;
+
+        this.mobileInput.enabled = true;
+
+        const style = document.createElement('style');
+        style.id = 'mobile-joystick-style';
+        style.textContent = `
+            #mobile-controls {
+                position: fixed;
+                inset: 0;
+                z-index: 260;
+                pointer-events: none;
+            }
+            .mobile-joystick {
+                position: absolute;
+                width: 130px;
+                height: 130px;
+                border-radius: 50%;
+                background: rgba(255, 255, 255, 0.08);
+                border: 1px solid rgba(255, 255, 255, 0.22);
+                backdrop-filter: blur(6px);
+                touch-action: none;
+                pointer-events: auto;
+            }
+            .mobile-joystick.left {
+                left: 20px;
+                bottom: 20px;
+            }
+            .mobile-joystick.right {
+                right: 20px;
+                bottom: 20px;
+            }
+            .mobile-joystick-knob {
+                position: absolute;
+                left: 40px;
+                top: 40px;
+                width: 50px;
+                height: 50px;
+                border-radius: 50%;
+                background: rgba(0, 255, 255, 0.45);
+                border: 1px solid rgba(0, 255, 255, 0.65);
+                box-shadow: 0 0 10px rgba(0, 255, 255, 0.4);
+                pointer-events: none;
+                transition: transform 0.04s linear;
+            }
+        `;
+        document.head.appendChild(style);
+
+        const wrap = document.createElement('div');
+        wrap.id = 'mobile-controls';
+
+        const left = document.createElement('div');
+        left.className = 'mobile-joystick left';
+        left.innerHTML = '<div class="mobile-joystick-knob"></div>';
+
+        const right = document.createElement('div');
+        right.className = 'mobile-joystick right';
+        right.innerHTML = '<div class="mobile-joystick-knob"></div>';
+
+        wrap.appendChild(left);
+        wrap.appendChild(right);
+        document.body.appendChild(wrap);
+
+        this.mobileJoystickElements = {
+            wrap,
+            left,
+            right,
+            leftKnob: left.querySelector('.mobile-joystick-knob'),
+            rightKnob: right.querySelector('.mobile-joystick-knob')
+        };
+
+        this.bindMobileJoystick(left, 'move');
+        this.bindMobileJoystick(right, 'look');
+    }
+
+    bindMobileJoystick(joystickEl, type) {
+        const knob = joystickEl.querySelector('.mobile-joystick-knob');
+        const touchState = { activeTouchId: null };
+        const radius = 44;
+
+        const handleInput = (clientX, clientY) => {
+            const rect = joystickEl.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+
+            let dx = clientX - centerX;
+            let dy = clientY - centerY;
+
+            const distance = Math.hypot(dx, dy);
+            if (distance > radius) {
+                const scale = radius / distance;
+                dx *= scale;
+                dy *= scale;
+            }
+
+            const normalizedX = dx / radius;
+            const normalizedY = dy / radius;
+
+            knob.style.transform = `translate(${dx}px, ${dy}px)`;
+            this.mobileInput[type].x = normalizedX;
+            this.mobileInput[type].y = normalizedY;
+        };
+
+        const reset = () => {
+            touchState.activeTouchId = null;
+            knob.style.transform = 'translate(0px, 0px)';
+            this.mobileInput[type].x = 0;
+            this.mobileInput[type].y = 0;
+        };
+
+        joystickEl.addEventListener('touchstart', (event) => {
+            if (touchState.activeTouchId !== null) return;
+            const touch = event.changedTouches[0];
+            touchState.activeTouchId = touch.identifier;
+            handleInput(touch.clientX, touch.clientY);
+            event.preventDefault();
+        }, { passive: false });
+
+        joystickEl.addEventListener('touchmove', (event) => {
+            if (touchState.activeTouchId === null) return;
+            for (let i = 0; i < event.changedTouches.length; i++) {
+                const touch = event.changedTouches[i];
+                if (touch.identifier === touchState.activeTouchId) {
+                    handleInput(touch.clientX, touch.clientY);
+                    event.preventDefault();
+                    break;
+                }
+            }
+        }, { passive: false });
+
+        joystickEl.addEventListener('touchend', (event) => {
+            if (touchState.activeTouchId === null) return;
+            for (let i = 0; i < event.changedTouches.length; i++) {
+                const touch = event.changedTouches[i];
+                if (touch.identifier === touchState.activeTouchId) {
+                    reset();
+                    event.preventDefault();
+                    break;
+                }
+            }
+        }, { passive: false });
+
+        joystickEl.addEventListener('touchcancel', () => {
+            reset();
+        });
+    }
     
     onMouseClick(event) {
         if (this.renderer.xr.isPresenting) return;
@@ -963,6 +1120,13 @@ class TheatreApp {
     updateMovement(deltaTime) {
         if (this.renderer.xr.isPresenting) return;
         if (this.omiSeat && this.omiSeat.isSeated) return;
+
+        if (this.mobileInput.enabled) {
+            this.yaw -= this.mobileInput.look.x * this.mobileLookSensitivity * deltaTime;
+            this.pitch -= this.mobileInput.look.y * this.mobileLookSensitivity * deltaTime;
+            this.pitch = Math.max(-Math.PI * 0.45, Math.min(Math.PI * 0.45, this.pitch));
+            this.applyCameraRotation();
+        }
         
         const moveSpeed = (this.controls.sprint ? this.controls.sprintSpeed : this.controls.speed) * deltaTime;
         
@@ -975,6 +1139,19 @@ class TheatreApp {
         if (this.controls.backward) moveVector.sub(forward);
         if (this.controls.right) moveVector.add(right);
         if (this.controls.left) moveVector.sub(right);
+
+        if (this.mobileInput.enabled) {
+            const analogForward = -this.mobileInput.move.y;
+            const analogStrafe = this.mobileInput.move.x;
+            const deadzone = 0.08;
+
+            if (Math.abs(analogForward) > deadzone) {
+                moveVector.add(forward.clone().multiplyScalar(analogForward));
+            }
+            if (Math.abs(analogStrafe) > deadzone) {
+                moveVector.add(right.clone().multiplyScalar(analogStrafe));
+            }
+        }
         
         if (moveVector.length() > 0) {
             moveVector.normalize().multiplyScalar(moveSpeed);
