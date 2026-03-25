@@ -1,16 +1,15 @@
 import { Server } from 'socket.io';
 
-// Store room data in memory (in production, you'd use a database)
 const rooms = new Map();
 
-// Room class to manage room state
 class Room {
     constructor(id) {
         this.id = id;
         this.users = new Map();
         this.host = null;
-        this.seats = new Array(160).fill(null); // 10 rows × 16 seats
+        this.seats = new Array(160).fill(null);
         this.screenSharing = false;
+        this.streamHost = null;
     }
     
     addUser(userId, userData) {
@@ -20,7 +19,6 @@ class Room {
             seatIndex: null
         });
         
-        // If first user, make them host
         if (this.users.size === 1) {
             this.host = userId;
         }
@@ -34,11 +32,16 @@ class Room {
         
         this.users.delete(userId);
         
-        // If host left, assign new host
         if (this.host === userId && this.users.size > 0) {
             this.host = this.users.keys().next().value;
         } else if (this.users.size === 0) {
             this.host = null;
+            this.streamHost = null;
+        }
+
+        if (this.streamHost === userId) {
+            this.screenSharing = false;
+            this.streamHost = null;
         }
     }
     
@@ -56,12 +59,10 @@ class Room {
             return { success: false, reason: 'User not found' };
         }
         
-        // Free previous seat if any
         if (user.seatIndex !== null) {
             this.seats[user.seatIndex] = null;
         }
         
-        // Assign new seat
         this.seats[seatIndex] = userId;
         user.seatIndex = seatIndex;
         
@@ -81,9 +82,15 @@ class Room {
             userCount: this.users.size,
             host: this.host,
             users: Array.from(this.users.values()),
-            screenSharing: this.screenSharing
+            screenSharing: this.screenSharing,
+            streamHost: this.streamHost
         };
     }
+}
+
+function findSocket(io, userId, roomId) {
+    return [...io.sockets.sockets.values()]
+        .find(s => s.userId === userId && s.currentRoom === roomId);
 }
 
 let io;
@@ -96,8 +103,6 @@ export default function handler(req, res) {
             cors: {
                 origin: [
                     "http://localhost:3000",
-                    "https://threeatre-fc2cgt3jg-jesse-altons-projects.vercel.app",
-                    /^https:\/\/threeatre-.*\.vercel\.app$/,
                     /^https:\/\/.*\.vercel\.app$/
                 ],
                 methods: ["GET", "POST"],
@@ -113,14 +118,12 @@ export default function handler(req, res) {
             socket.on('join-room', (data) => {
                 const { roomId, userData } = data;
                 
-                // Get or create room
                 if (!rooms.has(roomId)) {
                     rooms.set(roomId, new Room(roomId));
                 }
                 
                 const room = rooms.get(roomId);
                 
-                // Leave previous room if any
                 if (socket.currentRoom) {
                     socket.leave(socket.currentRoom);
                     const oldRoom = rooms.get(socket.currentRoom);
@@ -131,23 +134,19 @@ export default function handler(req, res) {
                     }
                 }
                 
-                // Join new room
                 socket.join(roomId);
                 socket.currentRoom = roomId;
                 socket.userId = userData.id;
                 
-                // Add user to room
                 room.addUser(userData.id, userData);
                 const user = room.users.get(userData.id);
                 user.socketId = socket.id;
                 
-                // Send room data to user
                 socket.emit('room-joined', {
                     ...room.toJSON(),
                     isHost: room.host === userData.id
                 });
                 
-                // Notify other users
                 socket.to(roomId).emit('user-joined', userData);
                 socket.to(roomId).emit('user-count-update', room.users.size);
                 
@@ -160,8 +159,6 @@ export default function handler(req, res) {
                 
                 if (room && socket.userId) {
                     room.updateUserPosition(socket.userId, position);
-                    
-                    // Broadcast position to other users in room
                     socket.to(roomId).emit('user-position-update', {
                         userId: socket.userId,
                         position: position
@@ -181,12 +178,104 @@ export default function handler(req, res) {
                             userId: socket.userId,
                             seatIndex: result.seatIndex
                         });
-                        console.log(`User ${socket.userId} assigned to seat ${result.seatIndex} in room ${roomId}`);
                     } else {
                         socket.emit('seat-request-denied', {
                             reason: result.reason
                         });
                     }
+                }
+            });
+
+            socket.on('leave-seat', (data) => {
+                const { roomId } = data;
+                const room = rooms.get(roomId);
+                
+                if (room && socket.userId) {
+                    const user = room.users.get(socket.userId);
+                    if (user && user.seatIndex !== null) {
+                        room.seats[user.seatIndex] = null;
+                        user.seatIndex = null;
+                        io.to(roomId).emit('seat-left', { userId: socket.userId });
+                    }
+                }
+            });
+
+            socket.on('request-host', (data) => {
+                const { roomId } = data;
+                const room = rooms.get(roomId);
+                
+                if (room && socket.userId) {
+                    if (!room.host || room.host === socket.userId) {
+                        room.host = socket.userId;
+                        io.to(roomId).emit('host-changed', socket.userId);
+                    }
+                }
+            });
+
+            socket.on('start-stream', (data) => {
+                const { roomId } = data;
+                const room = rooms.get(roomId);
+                
+                if (room && socket.userId) {
+                    room.screenSharing = true;
+                    room.streamHost = socket.userId;
+                    socket.to(roomId).emit('stream-started', { hostId: socket.userId });
+                }
+            });
+
+            socket.on('stop-stream', (data) => {
+                const { roomId } = data;
+                const room = rooms.get(roomId);
+                
+                if (room && socket.userId) {
+                    room.screenSharing = false;
+                    room.streamHost = null;
+                    socket.to(roomId).emit('stream-stopped');
+                }
+            });
+
+            socket.on('stream-offer', (data) => {
+                const { roomId, targetUserId, offer } = data;
+                const room = rooms.get(roomId);
+                
+                if (room && socket.userId) {
+                    const target = findSocket(io, targetUserId, roomId);
+                    if (target) {
+                        target.emit('stream-offer', { fromUserId: socket.userId, offer });
+                    }
+                }
+            });
+
+            socket.on('stream-answer', (data) => {
+                const { roomId, targetUserId, answer } = data;
+                const room = rooms.get(roomId);
+                
+                if (room && socket.userId) {
+                    const target = findSocket(io, targetUserId, roomId);
+                    if (target) {
+                        target.emit('stream-answer', { fromUserId: socket.userId, answer });
+                    }
+                }
+            });
+
+            socket.on('stream-ice-candidate', (data) => {
+                const { roomId, targetUserId, candidate } = data;
+                const room = rooms.get(roomId);
+                
+                if (room && socket.userId) {
+                    const target = findSocket(io, targetUserId, roomId);
+                    if (target) {
+                        target.emit('stream-ice-candidate', { fromUserId: socket.userId, candidate });
+                    }
+                }
+            });
+
+            socket.on('avatar-changed', (data) => {
+                const { roomId, userId } = data;
+                const room = rooms.get(roomId);
+                
+                if (room && socket.userId === userId) {
+                    socket.to(roomId).emit('avatar-changed', { userId });
                 }
             });
             
@@ -201,7 +290,54 @@ export default function handler(req, res) {
                         userName: userName,
                         timestamp: Date.now()
                     });
-                    console.log(`Chat message from ${socket.userId} in room ${roomId}: ${message}`);
+                }
+            });
+
+            socket.on('voice-status', (data) => {
+                const { roomId, enabled } = data;
+                const room = rooms.get(roomId);
+                
+                if (room && socket.userId) {
+                    socket.to(roomId).emit('voice-status', {
+                        userId: socket.userId,
+                        enabled: enabled
+                    });
+                }
+            });
+
+            socket.on('voice-offer', (data) => {
+                const { roomId, targetUserId, offer } = data;
+                const room = rooms.get(roomId);
+                
+                if (room && socket.userId) {
+                    const target = findSocket(io, targetUserId, roomId);
+                    if (target) {
+                        target.emit('voice-offer', { fromUserId: socket.userId, offer });
+                    }
+                }
+            });
+
+            socket.on('voice-answer', (data) => {
+                const { roomId, targetUserId, answer } = data;
+                const room = rooms.get(roomId);
+                
+                if (room && socket.userId) {
+                    const target = findSocket(io, targetUserId, roomId);
+                    if (target) {
+                        target.emit('voice-answer', { fromUserId: socket.userId, answer });
+                    }
+                }
+            });
+
+            socket.on('voice-ice-candidate', (data) => {
+                const { roomId, targetUserId, candidate } = data;
+                const room = rooms.get(roomId);
+                
+                if (room && socket.userId) {
+                    const target = findSocket(io, targetUserId, roomId);
+                    if (target) {
+                        target.emit('voice-ice-candidate', { fromUserId: socket.userId, candidate });
+                    }
                 }
             });
             
@@ -211,15 +347,22 @@ export default function handler(req, res) {
                 if (socket.currentRoom && socket.userId) {
                     const room = rooms.get(socket.currentRoom);
                     if (room) {
+                        const wasStreamHost = room.streamHost === socket.userId;
                         room.removeUser(socket.userId);
                         
                         socket.to(socket.currentRoom).emit('user-left', socket.userId);
                         socket.to(socket.currentRoom).emit('user-count-update', room.users.size);
                         
-                        // Clean up empty rooms
+                        if (room.host) {
+                            socket.to(socket.currentRoom).emit('host-changed', room.host);
+                        }
+
+                        if (wasStreamHost) {
+                            socket.to(socket.currentRoom).emit('stream-stopped');
+                        }
+                        
                         if (room.users.size === 0) {
                             rooms.delete(socket.currentRoom);
-                            console.log(`Room ${socket.currentRoom} deleted (empty)`);
                         }
                     }
                 }

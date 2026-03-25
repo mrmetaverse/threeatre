@@ -1,14 +1,15 @@
 {
   "name": "threeatre",
-  "version": "1.0.0",
-  "description": "WebXR Theatre for screen sharing with Three.js",
+  "version": "2.0.0",
+  "description": "WebXR Theatre - Live streaming watch parties with Three.js",
   "main": "index.html",
   "scripts": {
-    "dev": "vite --host",
+    "dev": "concurrently \"npm run server\" \"npm run dev:client\"",
+    "dev:client": "vite --host",
     "build": "vite build",
     "preview": "vite preview --host",
     "server": "node server.js",
-    "start": "concurrently \"npm run server\" \"npm run dev\"",
+    "start": "node server.js",
     "vercel-build": "npm run build"
   },
   "dependencies": {

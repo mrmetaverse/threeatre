@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Theatre } from './Theatre.js';
 import { WebXRManager } from './WebXRManager.js';
 import { NetworkManager } from './NetworkManager.js';
@@ -9,6 +8,7 @@ import { Bindle } from './Bindle.js';
 import { LicenseManager } from './LicenseManager.js';
 import { RoomCodeManager } from './RoomCodeManager.js';
 import { WearableManager } from './WearableManager.js';
+import { StreamManager } from './StreamManager.js';
 
 class TheatreApp {
     constructor() {
@@ -18,13 +18,13 @@ class TheatreApp {
         this.theatre = null;
         this.webxrManager = null;
         this.networkManager = null;
-        this.orbitControls = null;
         this.omiSeat = null;
         this.chatManager = null;
         this.bindle = null;
         this.licenseManager = null;
         this.roomCodeManager = null;
         this.wearableManager = null;
+        this.streamManager = null;
         this.isHost = false;
         this.users = new Map();
         this.controls = {
@@ -33,8 +33,8 @@ class TheatreApp {
             left: false,
             right: false,
             sprint: false,
-            speed: 8, // Base speed for larger space
-            sprintSpeed: 16 // Sprint speed
+            speed: 8,
+            sprintSpeed: 16
         };
         this.raycaster = new THREE.Raycaster();
         this.mouse = new THREE.Vector2();
@@ -44,16 +44,23 @@ class TheatreApp {
         this.isFlying = false;
         this.jumpPower = 12;
         this.lastJumpTime = 0;
-        this.jumpCooldown = 200; // ms between jumps
+        this.jumpCooldown = 200;
         this.flySpeed = 10;
         this.tomatoCharging = false;
         this.tomatoChargeStart = 0;
         this.tomatoPower = 0;
         this.maxTomatoPower = 3.0;
         this.isPrivateRoom = false;
-        this.cameraMode = 'first-person'; // 'first-person' or 'third-person'
+        this.cameraMode = 'first-person';
         this.thirdPersonDistance = 8;
         this.playerAvatar = null;
+
+        this.yaw = 0;
+        this.pitch = 0;
+        this.mouseSensitivity = 0.003;
+        this.isDragging = false;
+        this.lastMouseX = 0;
+        this.lastMouseY = 0;
         
         this.init();
         this.setupEventListeners();
@@ -72,7 +79,7 @@ class TheatreApp {
             0.1,
             1000
         );
-        this.camera.position.set(0, 6, 24); // Better view of the massive recessed seating
+        this.camera.position.set(0, 6, 24);
         
         // Create renderer (try WebGPU first, fallback to WebGL)
         await this.initRenderer();
@@ -104,11 +111,11 @@ class TheatreApp {
         // Connect main app reference to theatre
         this.theatre.setApp(this);
         
-        // Setup orbit controls for better camera movement
-        this.setupOrbitControls();
-        
         // Setup OMI seat system
-        this.omiSeat = new OMISeat(this.theatre, this.camera, this.orbitControls);
+        this.omiSeat = new OMISeat(this.theatre, this.camera);
+        
+        // Setup stream manager for WebRTC screen sharing
+        this.streamManager = new StreamManager(this.networkManager, this.theatre);
         
         // Setup chat system
         this.chatManager = new ChatManager(this.networkManager, this.scene);
@@ -134,7 +141,8 @@ class TheatreApp {
         // Initialize privacy UI
         setTimeout(() => this.updatePrivacyUI(), 1000);
         
-        // Create player avatar for third-person view
+        this.applyCameraRotation();
+        
         this.createPlayerAvatar();
     }
     
@@ -232,36 +240,30 @@ class TheatreApp {
     
     async startHosting() {
         try {
-            const stream = await navigator.mediaDevices.getDisplayMedia({
-                video: { mediaSource: 'screen' },
-                audio: true
-            });
+            const success = await this.streamManager.startHosting();
             
-            this.theatre.setHostStream(stream);
-            this.isHost = true;
-            
-            // Update UI
-            document.getElementById('host-button').classList.add('hidden');
-            document.getElementById('stop-host-button').classList.remove('hidden');
-            document.getElementById('host-status').textContent = 'You';
-            
-            console.log('Started hosting screen share');
+            if (success) {
+                this.isHost = true;
+                document.getElementById('host-button').classList.add('hidden');
+                document.getElementById('stop-host-button').classList.remove('hidden');
+                document.getElementById('host-status').textContent = 'You';
+                this.showMessage('Hosting started - viewers will see your screen via WebRTC', 'info');
+            } else {
+                this.showMessage('Could not start screen sharing', 'error');
+            }
         } catch (error) {
             console.error('Error starting screen share:', error);
-            alert('Could not start screen sharing. Please make sure you grant permission.');
+            this.showMessage('Could not start screen sharing. Please grant permission.', 'error');
         }
     }
     
     stopHosting() {
-        this.theatre.stopHostStream();
+        this.streamManager.stopHosting();
         this.isHost = false;
         
-        // Update UI
         document.getElementById('host-button').classList.remove('hidden');
         document.getElementById('stop-host-button').classList.add('hidden');
         document.getElementById('host-status').textContent = 'None';
-        
-        console.log('Stopped hosting screen share');
     }
     
     copyRoomUrl() {
@@ -754,40 +756,8 @@ class TheatreApp {
         }, 2000);
     }
     
-    setupOrbitControls() {
-        this.orbitControls = new OrbitControls(this.camera, this.renderer.domElement);
-        
-        // Configure for first-person/third-person switching
-        this.orbitControls.enableDamping = true;
-        this.orbitControls.dampingFactor = 0.05;
-        this.orbitControls.enableZoom = true;
-        this.orbitControls.enablePan = false;
-        
-        // Set limits for camera movement - prevent going through floor
-        this.orbitControls.maxPolarAngle = Math.PI * 0.85; // Prevent looking too far down
-        this.orbitControls.minPolarAngle = Math.PI * 0.1;
-        this.orbitControls.maxDistance = 50; // Max third-person distance
-        this.orbitControls.minDistance = 0.5; // Prevent getting too close to prevent clipping
-        
-        // Start in first-person mode
-        this.orbitControls.target.copy(this.camera.position);
-        this.orbitControls.target.z -= 1; // Look forward
-        
-        // Listen for zoom changes to switch camera modes
-        this.orbitControls.addEventListener('change', () => {
-            this.handleCameraZoomChange();
-            this.enforceGroundCollision();
-        });
-        
-        // Disable orbit controls when in VR/AR
-        this.orbitControls.enabled = !this.renderer.xr.isPresenting;
-        
-        console.log('Orbit controls configured with first/third person switching');
-    }
-    
     async createPlayerAvatar() {
         try {
-            // Create player avatar using the same system as other users
             const userData = {
                 id: 'local-player',
                 name: 'You',
@@ -796,148 +766,72 @@ class TheatreApp {
             
             const avatarInfo = await this.theatre.addUser('local-player', userData);
             this.playerAvatar = avatarInfo.avatar;
-            
-            // Start hidden (first-person mode)
             this.playerAvatar.visible = false;
-            
-            console.log('Player avatar created for third-person view');
         } catch (error) {
             console.warn('Failed to create player avatar:', error);
         }
     }
-    
-    handleCameraZoomChange() {
-        if (!this.orbitControls) return;
-        
-        const distance = this.camera.position.distanceTo(this.orbitControls.target);
-        
-        // Switch between first and third person based on zoom distance
-        if (distance < 2 && this.cameraMode === 'third-person') {
-            this.switchToFirstPerson();
-        } else if (distance >= 2 && this.cameraMode === 'first-person') {
-            this.switchToThirdPerson();
-        }
-        
-        // Update player avatar position in third-person
-        if (this.cameraMode === 'third-person' && this.playerAvatar) {
-            this.updatePlayerAvatarPosition();
-        }
+
+    applyCameraRotation() {
+        const euler = new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ');
+        this.camera.quaternion.setFromEuler(euler);
     }
-    
-    enforceGroundCollision() {
-        if (!this.orbitControls) return;
-        
-        const cameraPosition = this.camera.position;
-        const groundHeight = this.getGroundHeight(cameraPosition);
-        const minCameraHeight = groundHeight + 1.2; // Minimum height above ground
-        
-        // Prevent camera from going below ground level
-        if (cameraPosition.y < minCameraHeight) {
-            cameraPosition.y = minCameraHeight;
-            this.orbitControls.update();
-        }
-        
-        // Also check the orbit target
-        const targetGroundHeight = this.getGroundHeight(this.orbitControls.target);
-        const minTargetHeight = targetGroundHeight + 0.5;
-        
-        if (this.orbitControls.target.y < minTargetHeight) {
-            this.orbitControls.target.y = minTargetHeight;
-        }
+
+    getForwardVector() {
+        const forward = new THREE.Vector3(0, 0, -1);
+        forward.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
+        return forward;
     }
-    
-    switchToFirstPerson() {
-        this.cameraMode = 'first-person';
-        
-        // Hide player avatar
-        if (this.playerAvatar) {
-            this.playerAvatar.visible = false;
-        }
-        
-        // Set camera target to look forward
-        const lookTarget = this.camera.position.clone();
-        const forward = new THREE.Vector3();
-        this.camera.getWorldDirection(forward);
-        lookTarget.add(forward.multiplyScalar(5));
-        this.orbitControls.target.copy(lookTarget);
-        
-        console.log('📷 Switched to first-person view');
-    }
-    
-    switchToThirdPerson() {
-        this.cameraMode = 'third-person';
-        
-        // Show player avatar
-        if (this.playerAvatar) {
-            this.playerAvatar.visible = true;
-            this.updatePlayerAvatarPosition();
-        }
-        
-        console.log('👤 Switched to third-person view');
-    }
-    
-    updatePlayerAvatarPosition() {
-        if (!this.playerAvatar || !this.orbitControls) return;
-        
-        // Position avatar at the orbit target (where camera is looking)
-        this.playerAvatar.position.copy(this.orbitControls.target);
-        
-        // Adjust for ground height
-        const groundHeight = this.getGroundHeight(this.playerAvatar.position);
-        this.playerAvatar.position.y = groundHeight + 1.6; // Standing height
-        
-        // Make avatar look in the direction the camera is facing
-        const cameraDirection = new THREE.Vector3();
-        this.camera.getWorldDirection(cameraDirection);
-        cameraDirection.y = 0; // Keep horizontal
-        cameraDirection.normalize();
-        
-        if (cameraDirection.length() > 0) {
-            const lookAtPoint = this.playerAvatar.position.clone().add(cameraDirection);
-            this.playerAvatar.lookAt(lookAtPoint);
-        }
+
+    getRightVector() {
+        const right = new THREE.Vector3(1, 0, 0);
+        right.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
+        return right;
     }
     
     setupControls() {
-        // Keyboard controls
         document.addEventListener('keydown', (event) => {
-            if (!this.renderer.xr.isPresenting) {
-                switch(event.code) {
-                    case 'KeyW':
-                    case 'ArrowUp':
-                        this.controls.forward = true;
-                        break;
-                    case 'KeyS':
-                    case 'ArrowDown':
-                        this.controls.backward = true;
-                        break;
-                    case 'KeyA':
-                    case 'ArrowLeft':
-                        this.controls.left = true;
-                        break;
-                    case 'KeyD':
-                    case 'ArrowRight':
-                        this.controls.right = true;
-                        break;
-                    case 'Space':
-                        event.preventDefault();
-                        this.handleJump();
-                        break;
-                    case 'KeyT':
-                        event.preventDefault();
-                        this.startChargingTomato();
-                        break;
-                    case 'Escape':
-                        event.preventDefault();
-                        if (this.omiSeat) {
-                            this.omiSeat.handleKeyPress(event);
-                        }
-                        break;
-                    case 'ShiftLeft':
-                    case 'ShiftRight':
-                        this.controls.sprint = true;
-                        break;
-                }
+            if (this.renderer.xr.isPresenting) return;
+            if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') return;
+
+            switch(event.code) {
+                case 'KeyW':
+                case 'ArrowUp':
+                    this.controls.forward = true;
+                    break;
+                case 'KeyS':
+                case 'ArrowDown':
+                    this.controls.backward = true;
+                    break;
+                case 'KeyA':
+                case 'ArrowLeft':
+                    this.controls.left = true;
+                    break;
+                case 'KeyD':
+                case 'ArrowRight':
+                    this.controls.right = true;
+                    break;
+                case 'Space':
+                    event.preventDefault();
+                    this.handleJump();
+                    break;
+                case 'KeyT':
+                    event.preventDefault();
+                    this.startChargingTomato();
+                    break;
+                case 'Escape':
+                    event.preventDefault();
+                    if (document.pointerLockElement) {
+                        document.exitPointerLock();
+                    }
+                    if (this.omiSeat) {
+                        this.omiSeat.handleKeyPress(event);
+                    }
+                    break;
+                case 'ShiftLeft':
+                case 'ShiftRight':
+                    this.controls.sprint = true;
+                    break;
             }
         });
         
@@ -969,37 +863,46 @@ class TheatreApp {
             }
         });
         
-        // Mouse controls for seat selection
-        this.renderer.domElement.addEventListener('click', (event) => this.onMouseClick(event));
-        this.renderer.domElement.addEventListener('mousemove', (event) => this.onMouseMove(event));
-        
-        // Right-click for pointer lock in first-person mode
-        this.renderer.domElement.addEventListener('contextmenu', (e) => {
-            e.preventDefault();
-            if (!this.renderer.xr.isPresenting && this.cameraMode === 'first-person' && document.pointerLockElement !== this.renderer.domElement) {
-                this.renderer.domElement.requestPointerLock();
+        const canvas = this.renderer.domElement;
+
+        canvas.addEventListener('click', (event) => {
+            if (event.target.closest('#ui') || event.target.closest('#chat-container')) return;
+
+            if (!document.pointerLockElement) {
+                canvas.requestPointerLock();
+                return;
             }
+
+            this.onMouseClick(event);
         });
-        
+
+        canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
         document.addEventListener('pointerlockchange', () => {
-            if (document.pointerLockElement === this.renderer.domElement) {
-                document.addEventListener('mousemove', this.onPointerMove.bind(this), false);
-            } else {
-                document.removeEventListener('mousemove', this.onPointerMove.bind(this), false);
+            this._pointerLocked = document.pointerLockElement === canvas;
+        });
+        this._pointerLocked = false;
+
+        document.addEventListener('mousemove', (event) => {
+            this.mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            this.mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            if (this._pointerLocked && !this.renderer.xr.isPresenting) {
+                this.yaw -= event.movementX * this.mouseSensitivity;
+                this.pitch -= event.movementY * this.mouseSensitivity;
+                this.pitch = Math.max(-Math.PI * 0.45, Math.min(Math.PI * 0.45, this.pitch));
+                this.applyCameraRotation();
             }
         });
-    }
-    
-    onMouseMove(event) {
-        this.mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-        this.mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+        canvas.addEventListener('wheel', (event) => {
+            event.preventDefault();
+        }, { passive: false });
     }
     
     onMouseClick(event) {
         if (this.renderer.xr.isPresenting) return;
-        
-        // Prevent seat clicking when UI is being clicked
-        if (event.target.closest('#ui')) return;
+        if (event.target.closest('#ui') || event.target.closest('#chat-container')) return;
         
         this.raycaster.setFromCamera(this.mouse, this.camera);
         
@@ -1014,13 +917,16 @@ class TheatreApp {
             });
         });
         
-        // Check for treasure chest click first (if in dangerous world)
-        if (this.theatre.roguelikeWorld.isActive && this.theatre.roguelikeWorld.treasureChest) {
-            const treasureIntersects = this.raycaster.intersectObjects([this.theatre.roguelikeWorld.treasureChest], true);
-            if (treasureIntersects.length > 0) {
-                const opened = this.theatre.roguelikeWorld.openTreasureChest();
-                if (opened) {
-                    return; // Don't process other clicks
+        if (this.theatre.roguelikeWorld.isActive) {
+            const allChests = this.theatre.roguelikeWorld.treasureChests
+                .filter(tc => !tc.opened)
+                .map(tc => tc.mesh);
+
+            if (allChests.length > 0) {
+                const treasureIntersects = this.raycaster.intersectObjects(allChests, true);
+                if (treasureIntersects.length > 0) {
+                    const opened = this.theatre.roguelikeWorld.openTreasureChest();
+                    if (opened) return;
                 }
             }
         }
@@ -1053,114 +959,55 @@ class TheatreApp {
         }
     }
     
-    onPointerMove(event) {
-        if (!this.renderer.xr.isPresenting && document.pointerLockElement === this.renderer.domElement) {
-            const sensitivity = 0.002;
-            
-            // Rotate camera based on mouse movement
-            this.camera.rotation.y -= event.movementX * sensitivity;
-            this.camera.rotation.x -= event.movementY * sensitivity;
-            
-            // Clamp vertical rotation
-            this.camera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, this.camera.rotation.x));
-        }
-    }
-    
     updateMovement(deltaTime) {
         if (this.renderer.xr.isPresenting) return;
-        
-        // Update orbit controls
-        if (this.orbitControls) {
-            this.orbitControls.update();
-        }
+        if (this.omiSeat && this.omiSeat.isSeated) return;
         
         const moveSpeed = (this.controls.sprint ? this.controls.sprintSpeed : this.controls.speed) * deltaTime;
-        const direction = new THREE.Vector3();
         
-        if (this.controls.forward) direction.z -= 1;
-        if (this.controls.backward) direction.z += 1;
-        if (this.controls.left) direction.x -= 1;
-        if (this.controls.right) direction.x += 1;
+        const forward = this.getForwardVector();
+        const right = this.getRightVector();
         
-        if (direction.length() > 0) {
-            direction.normalize();
+        const moveVector = new THREE.Vector3();
+        
+        if (this.controls.forward) moveVector.add(forward);
+        if (this.controls.backward) moveVector.sub(forward);
+        if (this.controls.right) moveVector.add(right);
+        if (this.controls.left) moveVector.sub(right);
+        
+        if (moveVector.length() > 0) {
+            moveVector.normalize().multiplyScalar(moveSpeed);
+        }
+        
+        let newPosition = this.camera.position.clone().add(moveVector);
+        
+        if (this.isFlying) {
+            if (this.controls.forward || this.controls.backward) {
+                const flyDir = new THREE.Vector3(0, 0, -1);
+                flyDir.applyQuaternion(this.camera.quaternion);
+                const flySign = this.controls.forward ? 1 : -1;
+                newPosition.addScaledVector(flyDir, flySign * this.flySpeed * deltaTime);
+            }
+            this.velocity.y = 0;
+            this.isOnGround = false;
+        } else {
+            this.velocity.y += this.gravity * deltaTime;
+            newPosition.y += this.velocity.y * deltaTime;
             
-            // Get the camera's forward and right vectors
-            const cameraDirection = new THREE.Vector3();
-            this.camera.getWorldDirection(cameraDirection);
-            
-            const right = new THREE.Vector3();
-            right.crossVectors(cameraDirection, new THREE.Vector3(0, 1, 0)).normalize();
-            
-            const forward = new THREE.Vector3();
-            forward.copy(cameraDirection);
-            forward.y = 0; // Keep movement horizontal
-            forward.normalize();
-            
-            // Calculate movement vector
-            const moveVector = new THREE.Vector3();
-            moveVector.addScaledVector(forward, -direction.z);
-            moveVector.addScaledVector(right, direction.x);
-            moveVector.multiplyScalar(moveSpeed);
-            
-            let newPosition = this.camera.position.clone().add(moveVector);
-            
-            if (this.isFlying) {
-                // Flying mode - free movement in 3D space
-                if (this.controls.forward || this.controls.backward) {
-                    // Move in camera direction when flying
-                    const flyDirection = new THREE.Vector3();
-                    this.camera.getWorldDirection(flyDirection);
-                    flyDirection.multiplyScalar(direction.z * this.flySpeed * deltaTime);
-                    newPosition.add(flyDirection);
-                }
-                
-                // No gravity when flying
+            const groundHeight = this.getGroundHeight(newPosition);
+            if (newPosition.y <= groundHeight + 1.6) {
+                newPosition.y = groundHeight + 1.6;
                 this.velocity.y = 0;
-                this.isOnGround = false;
+                this.isOnGround = true;
             } else {
-                // Normal walking mode with gravity
-                this.velocity.y += this.gravity * deltaTime;
-                newPosition.y += this.velocity.y * deltaTime;
-                
-                // Ground collision detection
-                const groundHeight = this.getGroundHeight(newPosition);
-                if (newPosition.y <= groundHeight + 1.6) {
-                    newPosition.y = groundHeight + 1.6; // Eye height
-                    this.velocity.y = 0;
-                    this.isOnGround = true;
-                } else {
-                    this.isOnGround = false;
-                }
+                this.isOnGround = false;
             }
-            
-            this.camera.position.copy(newPosition);
-            
-            // Update orbit controls target based on camera mode
-            if (this.orbitControls) {
-                if (this.cameraMode === 'first-person') {
-                    // In first person, target moves with camera
-                    const lookTarget = this.camera.position.clone();
-                    const forward = new THREE.Vector3();
-                    this.camera.getWorldDirection(forward);
-                    lookTarget.add(forward.multiplyScalar(5));
-                    this.orbitControls.target.copy(lookTarget);
-                } else {
-                    // In third person, target is the player avatar position
-                    this.orbitControls.target.copy(newPosition);
-                    this.orbitControls.target.y = newPosition.y;
-                }
-            }
-            
-            // Update player avatar in third-person mode
-            if (this.cameraMode === 'third-person' && this.playerAvatar) {
-                this.updatePlayerAvatarPosition();
-            }
-            
-            // Send position update to network
-            if (this.networkManager) {
-                this.networkManager.updatePosition(this.camera.position);
-            }
+        }
+        
+        this.camera.position.copy(newPosition);
+        
+        if (this.networkManager && (moveVector.length() > 0 || !this.isOnGround)) {
+            this.networkManager.updatePosition(this.camera.position);
         }
     }
     

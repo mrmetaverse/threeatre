@@ -44,8 +44,9 @@ class Room {
         this.id = id;
         this.users = new Map();
         this.host = null;
-        this.seats = new Array(160).fill(null); // 10 rows × 16 seats
+        this.seats = new Array(160).fill(null);
         this.screenSharing = false;
+        this.streamHost = null;
     }
     
     addUser(userId, userData) {
@@ -69,11 +70,15 @@ class Room {
         
         this.users.delete(userId);
         
-        // If host left, assign new host
         if (this.host === userId && this.users.size > 0) {
             this.host = this.users.keys().next().value;
         } else if (this.users.size === 0) {
             this.host = null;
+        }
+
+        if (this.streamHost === userId) {
+            this.screenSharing = false;
+            this.streamHost = null;
         }
     }
     
@@ -116,7 +121,8 @@ class Room {
             userCount: this.users.size,
             host: this.host,
             users: Array.from(this.users.values()),
-            screenSharing: this.screenSharing
+            screenSharing: this.screenSharing,
+            streamHost: this.streamHost
         };
     }
 }
@@ -266,6 +272,81 @@ io.on('connection', (socket) => {
         }
     });
     
+    socket.on('start-stream', (data) => {
+        const { roomId, hostId } = data;
+        const room = rooms.get(roomId);
+        
+        if (room && socket.userId) {
+            room.screenSharing = true;
+            room.streamHost = socket.userId;
+            socket.to(roomId).emit('stream-started', { hostId: socket.userId });
+            console.log(`WebRTC stream started by ${socket.userId} in room ${roomId}`);
+        }
+    });
+    
+    socket.on('stop-stream', (data) => {
+        const { roomId } = data;
+        const room = rooms.get(roomId);
+        
+        if (room && socket.userId) {
+            room.screenSharing = false;
+            room.streamHost = null;
+            socket.to(roomId).emit('stream-stopped');
+            console.log(`WebRTC stream stopped in room ${roomId}`);
+        }
+    });
+    
+    socket.on('stream-offer', (data) => {
+        const { roomId, targetUserId, offer } = data;
+        const room = rooms.get(roomId);
+        
+        if (room && socket.userId) {
+            const targetSocket = [...io.sockets.sockets.values()]
+                .find(s => s.userId === targetUserId && s.currentRoom === roomId);
+            
+            if (targetSocket) {
+                targetSocket.emit('stream-offer', {
+                    fromUserId: socket.userId,
+                    offer: offer
+                });
+            }
+        }
+    });
+    
+    socket.on('stream-answer', (data) => {
+        const { roomId, targetUserId, answer } = data;
+        const room = rooms.get(roomId);
+        
+        if (room && socket.userId) {
+            const targetSocket = [...io.sockets.sockets.values()]
+                .find(s => s.userId === targetUserId && s.currentRoom === roomId);
+            
+            if (targetSocket) {
+                targetSocket.emit('stream-answer', {
+                    fromUserId: socket.userId,
+                    answer: answer
+                });
+            }
+        }
+    });
+    
+    socket.on('stream-ice-candidate', (data) => {
+        const { roomId, targetUserId, candidate } = data;
+        const room = rooms.get(roomId);
+        
+        if (room && socket.userId) {
+            const targetSocket = [...io.sockets.sockets.values()]
+                .find(s => s.userId === targetUserId && s.currentRoom === roomId);
+            
+            if (targetSocket) {
+                targetSocket.emit('stream-ice-candidate', {
+                    fromUserId: socket.userId,
+                    candidate: candidate
+                });
+            }
+        }
+    });
+    
     socket.on('avatar-changed', (data) => {
         const { roomId, userId } = data;
         const room = rooms.get(roomId);
@@ -367,18 +448,22 @@ io.on('connection', (socket) => {
         if (socket.currentRoom && socket.userId) {
             const room = rooms.get(socket.currentRoom);
             if (room) {
+                const wasStreamHost = room.streamHost === socket.userId;
                 room.removeUser(socket.userId);
                 
-                // Notify other users
                 socket.to(socket.currentRoom).emit('user-left', socket.userId);
                 socket.to(socket.currentRoom).emit('user-count-update', room.users.size);
                 
-                // If host changed, notify users
-                if (room.host !== socket.userId) {
+                if (room.host !== socket.userId && room.host) {
                     socket.to(socket.currentRoom).emit('host-changed', room.host);
                 }
+
+                if (wasStreamHost) {
+                    room.screenSharing = false;
+                    room.streamHost = null;
+                    socket.to(socket.currentRoom).emit('stream-stopped');
+                }
                 
-                // Clean up empty rooms
                 if (room.users.size === 0) {
                     rooms.delete(socket.currentRoom);
                     console.log(`Room ${socket.currentRoom} deleted (empty)`);

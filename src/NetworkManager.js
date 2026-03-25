@@ -5,31 +5,23 @@ export class NetworkManager {
         this.app = app;
         this.socket = null;
         this.userId = this.generateUserId();
-        this.roomId = this.getRoomIdFromUrl() || 'public-session'; // Default public session
+        this.roomId = this.getRoomIdFromUrl() || 'public-session';
         this.isConnected = false;
         this.isHost = false;
-        this.isSessionHost = false; // Host of the entire session
-        this.sessionMode = 'public'; // 'public', 'private', or 'local'
+        this.isSessionHost = false;
+        this.sessionMode = 'public';
         this.lastPositionUpdate = 0;
-        this.positionUpdateThrottle = 100; // ms
+        this.positionUpdateThrottle = 100;
+        this.serverUrl = null;
         
         this.detectSessionMode();
         this.init();
     }
     
     init() {
-        // Use environment-specific server URLs
-        let serverUrl;
+        this.serverUrl = this.resolveServerUrl();
         
-        if (window.location.hostname === 'localhost') {
-            // Local development
-            serverUrl = 'http://localhost:3001';
-        } else {
-            // Production - use Vercel serverless function
-            serverUrl = window.location.origin;
-        }
-        
-        this.socket = io(serverUrl, {
+        this.socket = io(this.serverUrl, {
             path: '/socket.io/',
             transports: ['websocket', 'polling'],
             upgrade: true,
@@ -43,15 +35,27 @@ export class NetworkManager {
         this.updateRoomIdDisplay();
         this.updateSessionStatus();
     }
+
+    resolveServerUrl() {
+        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+            return 'http://localhost:3001';
+        }
+
+        const envUrl = import.meta.env?.VITE_BACKEND_URL;
+        if (envUrl) {
+            return envUrl;
+        }
+
+        return window.location.origin;
+    }
     
     setupEventListeners() {
         this.socket.on('connect', () => {
-            console.log('✅ Connected to server:', serverUrl);
+            console.log('Connected to server:', this.serverUrl);
             this.isConnected = true;
             this.joinRoom();
             this.updateConnectionStatus('Connected');
             
-            // Hide any offline messages
             const offlineMsg = document.querySelector('[data-offline-message]');
             if (offlineMsg) offlineMsg.remove();
         });
@@ -63,8 +67,8 @@ export class NetworkManager {
         });
         
         this.socket.on('connect_error', (error) => {
-            console.error('❌ Connection error:', error);
-            console.log('🔄 Trying P2P mode as fallback...');
+            console.error('Connection error:', error.message);
+            console.log('Trying P2P mode as fallback...');
             this.updateConnectionStatus('P2P Mode');
             this.enableP2PMode();
         });
@@ -74,7 +78,6 @@ export class NetworkManager {
             this.isHost = data.isHost;
             this.updateUserCount(data.userCount);
             
-            // Add local user to the scene first
             const localUserData = {
                 id: this.userId,
                 name: `User ${this.userId.slice(-4)}`,
@@ -84,13 +87,16 @@ export class NetworkManager {
             
             this.addRemoteUser(localUserData);
             
-            // Add existing users to the scene
             if (data.users) {
                 data.users.forEach(user => {
                     if (user.id !== this.userId) {
                         this.addRemoteUser(user);
                     }
                 });
+            }
+
+            if (data.screenSharing && data.streamHost && data.streamHost !== this.userId) {
+                console.log('Room has active stream from:', data.streamHost);
             }
         });
         
@@ -114,19 +120,15 @@ export class NetworkManager {
             console.log('Seat assigned:', data);
             const result = this.app.theatre.assignSeat(data.userId, data.seatIndex);
             if (data.userId === this.userId) {
-                if (result.success) {
-                    console.log('You were assigned seat:', data.seatIndex);
-                } else {
+                if (!result.success) {
                     console.error('Failed to assign your seat:', result.reason);
                 }
-            } else {
-                console.log('User', data.userId, 'assigned to seat:', data.seatIndex);
             }
         });
         
         this.socket.on('seat-request-denied', (data) => {
             console.log('Seat request denied:', data.reason);
-            alert(`Cannot sit there: ${data.reason}`);
+            this.app.showMessage(`Cannot sit there: ${data.reason}`, 'error');
         });
         
         this.socket.on('host-changed', (hostId) => {
@@ -135,7 +137,6 @@ export class NetworkManager {
         
         this.socket.on('screen-share-started', (data) => {
             console.log('Screen share started by:', data.hostId);
-            // In a real implementation, you'd handle WebRTC here
         });
         
         this.socket.on('screen-share-stopped', () => {
@@ -151,8 +152,6 @@ export class NetworkManager {
         
         this.socket.on('avatar-changed', (data) => {
             console.log('User avatar changed:', data.userId);
-            // In a real implementation, you might want to reload the user's avatar
-            // For now, just log the change
         });
     }
     
@@ -235,7 +234,6 @@ export class NetworkManager {
     
     async addRemoteUser(userData) {
         if (!this.app.theatre.users.has(userData.id)) {
-            console.log('Adding remote user:', userData);
             try {
                 await this.app.theatre.addUser(userData.id, userData);
                 if (userData.position) {
@@ -269,8 +267,7 @@ export class NetworkManager {
             if (count !== undefined) {
                 userCountElement.textContent = count;
             } else {
-                // Count local users if no count provided
-                userCountElement.textContent = this.app.theatre.users.size + 1; // +1 for self
+                userCountElement.textContent = this.app.theatre.users.size + 1;
             }
         }
     }
@@ -298,16 +295,8 @@ export class NetworkManager {
     
     generateUserColor() {
         const colors = [
-            0x4CAF50, // Green
-            0x2196F3, // Blue  
-            0xFF9800, // Orange
-            0x9C27B0, // Purple
-            0xF44336, // Red
-            0x00BCD4, // Cyan
-            0x8BC34A, // Light Green
-            0xFF5722, // Deep Orange
-            0x3F51B5, // Indigo
-            0xE91E63  // Pink
+            0x4CAF50, 0x2196F3, 0xFF9800, 0x9C27B0, 0xF44336,
+            0x00BCD4, 0x8BC34A, 0xFF5722, 0x3F51B5, 0xE91E63
         ];
         return colors[Math.floor(Math.random() * colors.length)];
     }
@@ -340,25 +329,19 @@ export class NetworkManager {
         const roomUrl = this.getRoomUrl();
         navigator.clipboard.writeText(roomUrl).then(() => {
             console.log('Room URL copied to clipboard');
-            // You could show a toast notification here
         }).catch(err => {
             console.error('Failed to copy room URL:', err);
         });
     }
     
     enableP2PMode() {
-        console.log('Enabling P2P mode - peer-to-peer session');
-        
-        // Import and initialize P2P session manager
         import('./P2PSessionManager.js').then(({ P2PSessionManager }) => {
             this.p2pManager = new P2PSessionManager(this.app);
         });
         
-        // Simulate being connected for P2P
         this.isConnected = false;
         this.isHost = true;
         
-        // Add local user to scene
         const localUserData = {
             id: this.userId,
             name: `User ${this.userId.slice(-4)}`,
@@ -366,34 +349,14 @@ export class NetworkManager {
             position: { x: 0, y: 6, z: 24 }
         };
         
-        // Add user to theatre
         if (this.app && this.app.theatre) {
             this.app.theatre.addUser(localUserData.id, localUserData);
         }
         
-        // Update UI for P2P mode
         this.updateUserCount(1);
         this.updateHostStatus(this.userId);
         this.updateRoomIdDisplay();
-        
-        // Show P2P mode message
         this.showP2PMessage();
-    }
-    
-    getProductionServerUrl() {
-        // For now, we'll need to deploy the backend separately
-        // This could be Railway, Render, Heroku, or any Node.js hosting service
-        
-        // Try common deployment URLs (you'll need to update this with your actual backend URL)
-        const possibleUrls = [
-            'https://threeatre-backend.onrender.com',
-            'https://threeatre-backend-production.up.railway.app',
-            'https://threeatre-backend.herokuapp.com'
-        ];
-        
-        // For now, return the first option - you'll need to update this
-        console.log('⚠️ Backend server URL needs to be configured for multiplayer');
-        return possibleUrls[0];
     }
     
     detectSessionMode() {
@@ -404,8 +367,6 @@ export class NetworkManager {
         } else {
             this.sessionMode = 'public';
         }
-        
-        console.log('Session mode detected:', this.sessionMode);
     }
     
     updateSessionStatus() {
@@ -446,7 +407,7 @@ export class NetworkManager {
             backdrop-filter: blur(10px);
         `;
         messageDiv.innerHTML = `
-            🌐 P2P Session Mode<br>
+            P2P Session Mode<br>
             <span style="font-size: 12px; opacity: 0.8;">Share this URL for friends to join your session!</span><br>
             <span style="font-size: 11px; opacity: 0.6;">Direct peer-to-peer connection</span>
         `;

@@ -3,67 +3,84 @@
 ## Architecture
 
 Threeatre uses a split deployment architecture:
-- **Frontend**: Static files deployed to Vercel
-- **Backend**: Socket.IO server that needs persistent connections
+- **Frontend**: Vite-built static site deployed to **Vercel**
+- **Backend**: Socket.IO + Express server for real-time multiplayer on **Railway/Render**
+- **Streaming**: WebRTC peer-to-peer (signaled through Socket.IO backend)
 
-## Current Deployment
+## Quick Start
 
-### Frontend (Vercel)
-- **URL**: https://threeatre-gc6sw3n1x-jesse-altons-projects.vercel.app
-- **Status**: ✅ Deployed
-- **Features**: Full 3D theatre, UI, and client-side functionality
+### Local Development
 
-### Backend (Needs Deployment)
-- **Current**: Configured for Railway deployment
-- **File**: `server.js` - Socket.IO server for real-time features
-- **Port**: 3001 (configurable via PORT env var)
+```bash
+npm install
+npm run dev
+```
 
-## Deployment Options
+This starts both the Socket.IO backend (port 3001) and Vite dev server (port 3000).
 
-### Option 1: Railway (Recommended)
-1. Create account at railway.app
-2. Connect GitHub repository
-3. Deploy `server.js` as Node.js service
-4. Set environment variables if needed
-5. Update `NetworkManager.js` with Railway URL
+### Deploy Frontend to Vercel
 
-### Option 2: Render
-1. Create account at render.com
-2. Create new Web Service from GitHub
-3. Build command: `npm install`
-4. Start command: `node server.js`
-5. Update client URL configuration
+```bash
+npx vercel
+```
 
-### Option 3: Heroku
-1. Create Heroku app
-2. Add Node.js buildpack
-3. Set `npm start` to run `node server.js`
-4. Deploy via Git push
+Or connect your GitHub repo at vercel.com. Vercel auto-detects Vite and builds with `npm run build`.
+
+### Deploy Backend to Railway
+
+1. Create a new project at railway.app
+2. Connect your GitHub repository
+3. Set the start command: `node server.js`
+4. Set environment variable: `PORT=3001` (Railway sets this automatically)
+5. Note the deployment URL (e.g., `https://threeatre-production.up.railway.app`)
+
+### Connect Frontend to Backend
+
+Set the `VITE_BACKEND_URL` environment variable in your Vercel project settings:
+
+```
+VITE_BACKEND_URL=https://your-backend.railway.app
+```
+
+Then redeploy the frontend. The `NetworkManager` reads this at build time.
 
 ## Environment Variables
 
-### Backend Server
-- `PORT`: Server port (default: 3001)
-- `NODE_ENV`: Environment (production/development)
-
 ### Frontend (Vercel)
-- No environment variables needed
-- Server URL is hardcoded in NetworkManager.js
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `VITE_BACKEND_URL` | For production | URL of the Socket.IO backend |
 
-## Current Status
+### Backend (Railway/Render)
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `PORT` | Auto-set | Server port (default: 3001) |
+| `NODE_ENV` | Optional | Environment mode |
 
-- ✅ Frontend deployed to Vercel
-- ❌ Backend needs deployment to persistent server
-- 🔌 Offline mode works for single-player experience
-- 🌐 Ready for backend deployment
+## Deployment Options
 
-## Quick Fix for Production
+### Backend
 
-To enable multiplayer immediately:
+| Platform | Config File | Start Command |
+|----------|-------------|---------------|
+| Railway | `railway.json` | `node server.js` |
+| Render | `render.yaml` | `node server.js` |
 
-1. Deploy backend to Railway/Render/Heroku
-2. Update `NetworkManager.js` line 26 with your backend URL
-3. Redeploy frontend to Vercel
-4. Test with multiple users
+### Frontend
 
-The application gracefully falls back to offline mode if backend is unavailable.
+Vercel auto-detects Vite via `vercel.json`. The `api/socket.js` serverless function provides a fallback Socket.IO handler, but persistent backends (Railway/Render) are recommended for reliable WebSocket connections.
+
+## How Streaming Works
+
+1. **Host** clicks Start Hosting, which captures their screen via `getDisplayMedia`
+2. **StreamManager** creates WebRTC peer connections to each viewer
+3. **Signaling** (offer/answer/ICE) flows through the Socket.IO backend
+4. **Viewers** receive the video stream and display it on the theatre screen as a `VideoTexture`
+
+No media ever flows through the server - it is pure peer-to-peer via WebRTC.
+
+## Fallback Modes
+
+- If the backend is unreachable, the app falls back to **P2P mode** via `BroadcastChannel` (same-origin tabs only)
+- Screen sharing still works locally (host sees their own screen on the theatre)
+- Single-player exploration of the adventure world works fully offline
