@@ -740,13 +740,19 @@ export class RoguelikeWorld {
     }
 
     checkExitCollision(playerPosition) {
-        if (this.theatre.exitPortal) return playerPosition.distanceTo(this.theatre.exitPortal.position) < 2;
-        return false;
+        if (!this.theatre.exitPortal) return false;
+        const portalPos = this.theatre.exitPortal.position;
+        const dx = playerPosition.x - portalPos.x;
+        const dz = playerPosition.z - portalPos.z;
+        const xzDist = Math.sqrt(dx * dx + dz * dz);
+        return xzDist < 6 && playerPosition.z > 55;
     }
 
     checkReturnCollision(playerPosition) {
-        if (this.isActive) return playerPosition.distanceTo(this.exitPosition) < 4;
-        return false;
+        if (!this.isActive) return false;
+        const dx = playerPosition.x - this.exitPosition.x;
+        const dz = playerPosition.z - this.exitPosition.z;
+        return Math.sqrt(dx * dx + dz * dz) < 5;
     }
 
     getRandomFloorPosition() { return new THREE.Vector3((Math.random() - 0.5) * 200, 0, 90 + Math.random() * 200); }

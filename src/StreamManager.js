@@ -44,25 +44,33 @@ export class StreamManager {
 
     async startHosting() {
         try {
-            this.hostStream = await navigator.mediaDevices.getDisplayMedia({
-                video: {
-                    cursor: 'always',
-                    displaySurface: 'monitor',
-                    width: { ideal: 1920, max: 2560 },
-                    height: { ideal: 1080, max: 1440 },
-                    frameRate: { ideal: 30, max: 60 }
-                },
-                audio: {
-                    echoCancellation: false,
-                    noiseSuppression: false,
-                    autoGainControl: false,
-                    sampleRate: 48000,
-                    channelCount: 2
-                },
-                preferCurrentTab: false,
-                selfBrowserSurface: 'exclude',
-                systemAudio: 'include'
-            });
+            try {
+                this.hostStream = await navigator.mediaDevices.getDisplayMedia({
+                    video: {
+                        cursor: 'always',
+                        displaySurface: 'monitor',
+                        width: { ideal: 1920, max: 2560 },
+                        height: { ideal: 1080, max: 1440 },
+                        frameRate: { ideal: 30, max: 60 }
+                    },
+                    audio: {
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false,
+                        sampleRate: 48000,
+                        channelCount: 2
+                    },
+                    preferCurrentTab: false,
+                    selfBrowserSurface: 'exclude',
+                    systemAudio: 'include'
+                });
+            } catch (firstErr) {
+                console.warn('Detailed capture failed, trying simple constraints:', firstErr);
+                this.hostStream = await navigator.mediaDevices.getDisplayMedia({
+                    video: { cursor: 'always', width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } },
+                    audio: true
+                });
+            }
 
             const videoTrack = this.hostStream.getVideoTracks()[0];
             if (videoTrack) {
@@ -88,6 +96,9 @@ export class StreamManager {
             const audioTrack = this.hostStream.getAudioTracks()[0];
             if (audioTrack) {
                 audioTrack.contentHint = 'music';
+                console.log('Audio capture active:', audioTrack.label, '| enabled:', audioTrack.enabled);
+            } else {
+                console.warn('No audio track captured. Viewers will not hear audio. Check browser audio sharing permissions.');
             }
 
             this.isHost = true;

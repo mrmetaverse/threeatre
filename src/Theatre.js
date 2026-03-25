@@ -474,6 +474,7 @@ export class Theatre {
             this.hostVideo.srcObject = null;
             this.hostVideo.remove();
         }
+        this.removeUnmuteOverlay();
 
         const video = document.createElement('video');
         this.hostVideo = video;
@@ -483,23 +484,20 @@ export class Theatre {
         video.disablePictureInPicture = true;
         video.preload = 'auto';
 
-        if (isLocalHost) {
-            video.muted = true;
-        } else {
-            video.muted = false;
-            video.volume = 1.0;
-        }
+        video.muted = true;
+        video.volume = 1.0;
 
         video.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;';
         document.body.appendChild(video);
-
         video.srcObject = stream;
+
+        const hasAudio = stream.getAudioTracks().length > 0;
 
         video.addEventListener('loadedmetadata', () => {
             const w = video.videoWidth;
             const h = video.videoHeight;
             const ar = w / h;
-            console.log('Stream loaded:', w, 'x', h, '| A/V tracks:', stream.getVideoTracks().length, '/', stream.getAudioTracks().length);
+            console.log('Stream:', w, 'x', h, '| audio tracks:', stream.getAudioTracks().length, '| local:', isLocalHost);
 
             this.adjustScreenToContent(ar);
 
@@ -517,39 +515,66 @@ export class Theatre {
                 side: THREE.DoubleSide,
                 toneMapped: false
             });
+
+            if (!isLocalHost && hasAudio) {
+                this.showUnmuteOverlay(video);
+            }
         });
 
         video.addEventListener('canplay', () => {
-            video.play().catch(e => console.error('Error playing video:', e));
+            video.play().catch(() => {});
         });
 
         if (!isLocalHost) {
-            video.addEventListener('waiting', () => {
-                console.warn('Stream buffering...');
-            });
             video.addEventListener('stalled', () => {
-                console.warn('Stream stalled, attempting recovery...');
-                setTimeout(() => {
-                    if (video.paused) video.play().catch(() => {});
-                }, 500);
+                setTimeout(() => { if (video.paused) video.play().catch(() => {}); }, 500);
             });
 
             this.syncInterval = setInterval(() => {
                 if (!video || video.paused || !video.buffered.length) return;
-                const bufferedEnd = video.buffered.end(video.buffered.length - 1);
-                const lag = bufferedEnd - video.currentTime;
-                if (lag > 0.5) {
-                    video.currentTime = bufferedEnd - 0.05;
-                    console.log('A/V sync: jumped ahead', lag.toFixed(2), 's');
-                }
-            }, 3000);
+                try {
+                    const end = video.buffered.end(video.buffered.length - 1);
+                    const lag = end - video.currentTime;
+                    if (lag > 0.8) {
+                        video.currentTime = end - 0.05;
+                    }
+                } catch (e) { /* buffered range empty */ }
+            }, 2000);
         }
 
         stream.getTracks().forEach(track => {
             track.addEventListener('ended', () => this.stopHostStream());
         });
+    }
 
-        console.log('Host stream set (local:', isLocalHost, ', audio:', stream.getAudioTracks().length > 0, ')');
+    showUnmuteOverlay(video) {
+        this.removeUnmuteOverlay();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'unmute-overlay';
+        overlay.style.cssText = `position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.85);border:2px solid #00ffcc;border-radius:12px;padding:14px 28px;color:#00ffcc;font-size:16px;font-weight:bold;cursor:pointer;z-index:500;text-align:center;backdrop-filter:blur(10px);box-shadow:0 0 20px rgba(0,255,200,0.3);animation:unmutePulse 2s infinite;`;
+        overlay.textContent = 'Click to unmute stream audio';
+
+        if (!document.getElementById('unmute-pulse-style')) {
+            const s = document.createElement('style');
+            s.id = 'unmute-pulse-style';
+            s.textContent = `@keyframes unmutePulse{0%,100%{box-shadow:0 0 20px rgba(0,255,200,0.3)}50%{box-shadow:0 0 35px rgba(0,255,200,0.6)}}`;
+            document.head.appendChild(s);
+        }
+
+        overlay.addEventListener('click', () => {
+            video.muted = false;
+            video.volume = 1.0;
+            video.play().catch(() => {});
+            this.removeUnmuteOverlay();
+        });
+
+        document.body.appendChild(overlay);
+    }
+
+    removeUnmuteOverlay() {
+        const el = document.getElementById('unmute-overlay');
+        if (el) el.remove();
     }
     
     adjustScreenToContent(aspectRatio) {
@@ -582,6 +607,8 @@ export class Theatre {
             this.syncInterval = null;
         }
 
+        this.removeUnmuteOverlay();
+
         if (this.hostVideo) {
             this.hostVideo.pause();
             if (this.hostVideo.srcObject) {
@@ -604,8 +631,6 @@ export class Theatre {
                 side: THREE.DoubleSide
             });
         }
-
-        console.log('Host stream stopped');
     }
     
     async addUser(userId, userData) {
