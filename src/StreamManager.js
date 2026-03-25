@@ -6,16 +6,17 @@ export class StreamManager {
         this.hostStream = null;
         this.peerConnections = new Map();
         this.pendingCandidates = new Map();
+
         this.iceServers = [
             { urls: 'stun:stun.l.google.com:19302' },
             { urls: 'stun:stun1.l.google.com:19302' },
-            { urls: 'stun:stun2.l.google.com:19302' },
-            { urls: 'stun:stun3.l.google.com:19302' },
-            { urls: 'stun:stun4.l.google.com:19302' }
+            { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+            { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+            { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+            { urls: 'turns:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
         ];
 
-        this.targetBitrate = 6_000_000;
-        this.maxBitrate = 10_000_000;
+        this.maxBitrate = 4_000_000;
         this.bitrateInterval = null;
 
         this.setupSignaling();
@@ -33,7 +34,7 @@ export class StreamManager {
 
         socket.on('user-joined', (userData) => {
             if (this.isHost && this.hostStream) {
-                setTimeout(() => this.sendOfferToViewer(userData.id), 1000);
+                setTimeout(() => this.sendOfferToViewer(userData.id), 1500);
             }
         });
 
@@ -48,65 +49,39 @@ export class StreamManager {
                 this.hostStream = await navigator.mediaDevices.getDisplayMedia({
                     video: {
                         cursor: 'always',
-                        displaySurface: 'monitor',
-                        width: { ideal: 1920, max: 2560 },
-                        height: { ideal: 1080, max: 1440 },
-                        frameRate: { ideal: 30, max: 60 }
+                        width: { ideal: 1920 },
+                        height: { ideal: 1080 },
+                        frameRate: { ideal: 30 }
                     },
-                    audio: {
-                        echoCancellation: false,
-                        noiseSuppression: false,
-                        autoGainControl: false,
-                        sampleRate: 48000,
-                        channelCount: 2
-                    },
-                    preferCurrentTab: false,
-                    selfBrowserSurface: 'exclude',
+                    audio: true,
                     systemAudio: 'include'
                 });
-            } catch (firstErr) {
-                console.warn('Detailed capture failed, trying simple constraints:', firstErr);
+            } catch (e1) {
                 this.hostStream = await navigator.mediaDevices.getDisplayMedia({
-                    video: { cursor: 'always', width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } },
+                    video: true,
                     audio: true
                 });
             }
 
-            const videoTrack = this.hostStream.getVideoTracks()[0];
-            if (videoTrack) {
-                const capabilities = videoTrack.getCapabilities?.();
-                const settings = videoTrack.getSettings();
-                console.log('Capture resolution:', settings.width, 'x', settings.height, '@', settings.frameRate, 'fps');
-
-                if (capabilities?.width?.max >= 1920) {
-                    try {
-                        await videoTrack.applyConstraints({
-                            width: { ideal: 1920 },
-                            height: { ideal: 1080 },
-                            frameRate: { ideal: 30, max: 60 }
-                        });
-                    } catch (e) {
-                        console.warn('Could not apply higher constraints:', e);
-                    }
-                }
-
-                videoTrack.contentHint = 'detail';
+            const vt = this.hostStream.getVideoTracks()[0];
+            if (vt) {
+                vt.contentHint = 'detail';
+                const s = vt.getSettings();
+                console.log('Capture:', s.width, 'x', s.height, '@', s.frameRate, 'fps');
             }
 
-            const audioTrack = this.hostStream.getAudioTracks()[0];
-            if (audioTrack) {
-                audioTrack.contentHint = 'music';
-                console.log('Audio capture active:', audioTrack.label, '| enabled:', audioTrack.enabled);
+            const at = this.hostStream.getAudioTracks()[0];
+            if (at) {
+                at.contentHint = 'music';
+                console.log('Audio track:', at.label);
             } else {
-                console.warn('No audio track captured. Viewers will not hear audio. Check browser audio sharing permissions.');
+                console.warn('No audio captured - check browser audio sharing option');
             }
 
             this.isHost = true;
             this.theatre.setHostStream(this.hostStream, true);
 
-            videoTrack?.addEventListener('ended', () => {
-                this.stopHosting();
-            });
+            vt?.addEventListener('ended', () => this.stopHosting());
 
             const socket = this.networkManager?.socket;
             if (socket && this.networkManager.isConnected) {
@@ -125,7 +100,7 @@ export class StreamManager {
 
     stopHosting() {
         if (this.hostStream) {
-            this.hostStream.getTracks().forEach(track => track.stop());
+            this.hostStream.getTracks().forEach(t => t.stop());
             this.hostStream = null;
         }
 
@@ -134,7 +109,7 @@ export class StreamManager {
             this.bitrateInterval = null;
         }
 
-        this.peerConnections.forEach((pc) => pc.close());
+        this.peerConnections.forEach(pc => pc.close());
         this.peerConnections.clear();
         this.pendingCandidates.clear();
 
@@ -160,88 +135,86 @@ export class StreamManager {
                 }
             });
 
-            const offer = await pc.createOffer();
-            const boostedSdp = this.boostSdpBitrate(offer.sdp);
-            await pc.setLocalDescription({ type: offer.type, sdp: boostedSdp });
+            const offer = await pc.createOffer({ iceRestart: false });
+            await pc.setLocalDescription(offer);
 
-            const socket = this.networkManager?.socket;
-            if (socket) {
-                socket.emit('stream-offer', {
-                    roomId: this.networkManager.roomId,
-                    targetUserId: viewerId,
-                    offer: { type: offer.type, sdp: boostedSdp }
-                });
-            }
+            this.networkManager?.socket?.emit('stream-offer', {
+                roomId: this.networkManager.roomId,
+                targetUserId: viewerId,
+                offer: { type: offer.type, sdp: offer.sdp }
+            });
         } catch (error) {
-            console.error('Failed to create offer for viewer:', viewerId, error);
+            console.error('Offer failed for', viewerId, error);
+        }
+    }
+
+    async iceRestart(userId) {
+        const pc = this.peerConnections.get(userId);
+        if (!pc || !this.isHost || !this.hostStream) return;
+
+        try {
+            console.log('ICE restart for', userId);
+            const offer = await pc.createOffer({ iceRestart: true });
+            await pc.setLocalDescription(offer);
+
+            this.networkManager?.socket?.emit('stream-offer', {
+                roomId: this.networkManager.roomId,
+                targetUserId: userId,
+                offer: { type: offer.type, sdp: offer.sdp }
+            });
+        } catch (e) {
+            console.warn('ICE restart failed, doing full reconnect for', userId);
+            this.closePeerConnection(userId);
+            setTimeout(() => this.sendOfferToViewer(userId), 1000);
         }
     }
 
     async configureVideoSender(sender) {
         if (!sender || sender.track?.kind !== 'video') return;
 
-        await new Promise(r => setTimeout(r, 500));
+        await new Promise(r => setTimeout(r, 800));
 
         try {
             const params = sender.getParameters();
-            if (!params.encodings || params.encodings.length === 0) {
-                params.encodings = [{}];
-            }
+            if (!params.encodings?.length) params.encodings = [{}];
 
             params.encodings[0].maxBitrate = this.maxBitrate;
-            params.encodings[0].maxFramerate = 60;
+            params.encodings[0].maxFramerate = 30;
             params.encodings[0].networkPriority = 'high';
             params.encodings[0].priority = 'high';
-
-            if (params.encodings[0].scaleResolutionDownBy !== undefined) {
-                params.encodings[0].scaleResolutionDownBy = 1.0;
-            }
-
-            params.degradationPreference = 'maintain-resolution';
+            params.degradationPreference = 'balanced';
 
             await sender.setParameters(params);
-            console.log('Video sender configured: maxBitrate', this.maxBitrate / 1e6, 'Mbps');
+            console.log('Sender configured:', this.maxBitrate / 1e6, 'Mbps max');
         } catch (e) {
-            console.warn('Could not configure sender params:', e);
+            console.warn('Could not set sender params:', e.message);
         }
-    }
-
-    boostSdpBitrate(sdp) {
-        const bitrateKbps = Math.floor(this.maxBitrate / 1000);
-
-        sdp = sdp.replace(/b=AS:\d+/g, `b=AS:${bitrateKbps}`);
-
-        if (!sdp.includes('b=AS:')) {
-            sdp = sdp.replace(/(m=video.*\r\n)/g, `$1b=AS:${bitrateKbps}\r\n`);
-        }
-
-        sdp = sdp.replace(/b=TIAS:\d+/g, `b=TIAS:${this.maxBitrate}`);
-        if (!sdp.includes('b=TIAS:')) {
-            sdp = sdp.replace(/(m=video.*\r\n)/g, `$1b=TIAS:${this.maxBitrate}\r\n`);
-        }
-
-        return sdp;
     }
 
     async handleStreamOffer(data) {
         const { fromUserId, offer } = data;
 
         try {
-            const pc = this.createPeerConnection(fromUserId);
+            let pc = this.peerConnections.get(fromUserId);
+            const isRenegotiation = pc && pc.signalingState !== 'closed';
+
+            if (!isRenegotiation) {
+                pc = this.createPeerConnection(fromUserId);
+            }
 
             pc.ontrack = (event) => {
                 const remoteStream = event.streams[0];
                 if (remoteStream) {
                     this.theatre.setHostStream(remoteStream, false);
-                    console.log('Receiving host stream via WebRTC');
+                    console.log('Receiving stream via WebRTC');
                 }
             };
 
             await pc.setRemoteDescription(new RTCSessionDescription(offer));
 
             if (this.pendingCandidates.has(fromUserId)) {
-                for (const candidate of this.pendingCandidates.get(fromUserId)) {
-                    await pc.addIceCandidate(new RTCIceCandidate(candidate));
+                for (const c of this.pendingCandidates.get(fromUserId)) {
+                    await pc.addIceCandidate(new RTCIceCandidate(c));
                 }
                 this.pendingCandidates.delete(fromUserId);
             }
@@ -249,16 +222,13 @@ export class StreamManager {
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
 
-            const socket = this.networkManager?.socket;
-            if (socket) {
-                socket.emit('stream-answer', {
-                    roomId: this.networkManager.roomId,
-                    targetUserId: fromUserId,
-                    answer: { type: answer.type, sdp: answer.sdp }
-                });
-            }
+            this.networkManager?.socket?.emit('stream-answer', {
+                roomId: this.networkManager.roomId,
+                targetUserId: fromUserId,
+                answer: { type: answer.type, sdp: answer.sdp }
+            });
         } catch (error) {
-            console.error('Failed to handle stream offer:', error);
+            console.error('Stream offer handling failed:', error);
         }
     }
 
@@ -271,43 +241,15 @@ export class StreamManager {
                 await pc.setRemoteDescription(new RTCSessionDescription(answer));
 
                 if (this.pendingCandidates.has(fromUserId)) {
-                    for (const candidate of this.pendingCandidates.get(fromUserId)) {
-                        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+                    for (const c of this.pendingCandidates.get(fromUserId)) {
+                        await pc.addIceCandidate(new RTCIceCandidate(c));
                     }
                     this.pendingCandidates.delete(fromUserId);
                 }
-
-                this.startBitrateMonitoring(pc, fromUserId);
             } catch (error) {
-                console.error('Failed to handle stream answer:', error);
+                console.error('Stream answer failed:', error);
             }
         }
-    }
-
-    startBitrateMonitoring(pc, userId) {
-        if (this.bitrateInterval) clearInterval(this.bitrateInterval);
-
-        let lastBytesSent = 0;
-        let lastTimestamp = Date.now();
-
-        this.bitrateInterval = setInterval(async () => {
-            try {
-                const stats = await pc.getStats();
-                stats.forEach(report => {
-                    if (report.type === 'outbound-rtp' && report.kind === 'video') {
-                        const now = Date.now();
-                        const elapsed = (now - lastTimestamp) / 1000;
-                        if (elapsed > 0 && lastBytesSent > 0) {
-                            const bitrate = ((report.bytesSent - lastBytesSent) * 8) / elapsed;
-                            const mbps = (bitrate / 1e6).toFixed(2);
-                            console.log(`Stream bitrate: ${mbps} Mbps | ${report.framesPerSecond || '?'} fps | ${report.frameWidth}x${report.frameHeight}`);
-                        }
-                        lastBytesSent = report.bytesSent;
-                        lastTimestamp = now;
-                    }
-                });
-            } catch (e) { /* stats unavailable */ }
-        }, 5000);
     }
 
     async handleIceCandidate(data) {
@@ -317,8 +259,8 @@ export class StreamManager {
         if (pc && pc.remoteDescription) {
             try {
                 await pc.addIceCandidate(new RTCIceCandidate(candidate));
-            } catch (error) {
-                console.error('Failed to add ICE candidate:', error);
+            } catch (e) {
+                console.warn('ICE candidate failed:', e.message);
             }
         } else {
             if (!this.pendingCandidates.has(fromUserId)) {
@@ -335,7 +277,7 @@ export class StreamManager {
     handleStreamStopped() {
         if (!this.isHost) {
             this.theatre.stopHostStream();
-            this.peerConnections.forEach((pc) => pc.close());
+            this.peerConnections.forEach(pc => pc.close());
             this.peerConnections.clear();
             this.pendingCandidates.clear();
         }
@@ -348,46 +290,58 @@ export class StreamManager {
 
         const pc = new RTCPeerConnection({
             iceServers: this.iceServers,
-            iceCandidatePoolSize: 10,
+            iceCandidatePoolSize: 5,
             bundlePolicy: 'max-bundle',
-            rtcpMuxPolicy: 'require'
+            rtcpMuxPolicy: 'require',
+            iceTransportPolicy: 'all'
         });
 
         pc.onicecandidate = (event) => {
             if (event.candidate) {
-                const socket = this.networkManager?.socket;
-                if (socket) {
-                    socket.emit('stream-ice-candidate', {
-                        roomId: this.networkManager.roomId,
-                        targetUserId: userId,
-                        candidate: {
-                            candidate: event.candidate.candidate,
-                            sdpMid: event.candidate.sdpMid,
-                            sdpMLineIndex: event.candidate.sdpMLineIndex
+                this.networkManager?.socket?.emit('stream-ice-candidate', {
+                    roomId: this.networkManager.roomId,
+                    targetUserId: userId,
+                    candidate: {
+                        candidate: event.candidate.candidate,
+                        sdpMid: event.candidate.sdpMid,
+                        sdpMLineIndex: event.candidate.sdpMLineIndex
+                    }
+                });
+            }
+        };
+
+        pc.oniceconnectionstatechange = () => {
+            const state = pc.iceConnectionState;
+            console.log(`ICE [${userId.slice(-4)}]: ${state}`);
+
+            if (state === 'disconnected') {
+                if (this.isHost) {
+                    setTimeout(() => {
+                        if (pc.iceConnectionState === 'disconnected') {
+                            this.iceRestart(userId);
                         }
-                    });
+                    }, 3000);
+                }
+            }
+
+            if (state === 'failed') {
+                if (this.isHost) {
+                    this.iceRestart(userId);
                 }
             }
         };
 
         pc.onconnectionstatechange = () => {
             const state = pc.connectionState;
+            if (state === 'connected') {
+                console.log(`Stream live with ${userId.slice(-4)}`);
+            }
             if (state === 'failed') {
-                console.warn(`Peer ${userId} failed, attempting reconnect...`);
+                console.warn(`Peer ${userId.slice(-4)} connection failed`);
                 this.closePeerConnection(userId);
                 if (this.isHost && this.hostStream) {
                     setTimeout(() => this.sendOfferToViewer(userId), 2000);
                 }
-            }
-            if (state === 'disconnected') {
-                setTimeout(() => {
-                    if (pc.connectionState === 'disconnected') {
-                        this.closePeerConnection(userId);
-                    }
-                }, 5000);
-            }
-            if (state === 'connected') {
-                console.log(`Stream connected with ${userId}`);
             }
         };
 
