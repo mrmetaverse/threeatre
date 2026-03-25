@@ -12,14 +12,17 @@ const io = new Server(server, {
         origin: [
             "http://localhost:3000", 
             "http://127.0.0.1:3000",
-            "https://threeatre-gc6sw3n1x-jesse-altons-projects.vercel.app",
             "https://threeatre.vercel.app",
             /^https:\/\/.*\.vercel\.app$/
         ],
         methods: ["GET", "POST"],
         credentials: true
     },
-    transports: ['websocket', 'polling']
+    transports: ['websocket', 'polling'],
+    pingInterval: 10000,
+    pingTimeout: 15000,
+    connectTimeout: 20000,
+    maxHttpBufferSize: 1e6
 });
 
 app.use(cors());

@@ -26,8 +26,11 @@ export class NetworkManager {
             transports: ['websocket', 'polling'],
             upgrade: true,
             rememberUpgrade: true,
-            timeout: 10000,
-            forceNew: true
+            timeout: 20000,
+            reconnection: true,
+            reconnectionAttempts: Infinity,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000
         });
         
         this.setupEventListeners();
@@ -67,8 +70,19 @@ export class NetworkManager {
         });
         
         this.socket.on('connect_error', (error) => {
-            console.error('Connection error:', error.message);
-            console.log('Trying P2P mode as fallback...');
+            console.warn('Connection error:', error.message);
+            this.updateConnectionStatus('Reconnecting...');
+        });
+
+        this.socket.io.on('reconnect', () => {
+            console.log('Reconnected to server');
+            this.isConnected = true;
+            this.joinRoom();
+            this.updateConnectionStatus('Connected');
+        });
+
+        this.socket.io.on('reconnect_failed', () => {
+            console.log('All reconnect attempts failed, falling back to P2P');
             this.updateConnectionStatus('P2P Mode');
             this.enableP2PMode();
         });
