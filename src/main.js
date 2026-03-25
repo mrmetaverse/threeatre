@@ -793,6 +793,7 @@ class TheatreApp {
         document.addEventListener('keydown', (event) => {
             if (this.renderer.xr.isPresenting) return;
             if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') return;
+            if (this.chatManager?.isTyping) return;
 
             switch(event.code) {
                 case 'KeyW':

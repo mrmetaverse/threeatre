@@ -6,513 +6,315 @@ export class ChatManager {
         this.localStream = null;
         this.peerConnections = new Map();
         this.voiceUsers = new Map();
-        this.chatVisible = false;
-        
+        this.isTyping = false;
+        this.messageHistory = [];
+        this.maxMessages = 100;
+        this.fadeTimeout = null;
+        this.userName = `Anon_${(this.networkManager?.userId || 'local').slice(-4)}`;
+
         this.init();
     }
-    
+
     init() {
         this.createChatUI();
+        this.createStyles();
         this.setupEventListeners();
         this.setupVoiceChat();
+        this.addSystemMessage('Welcome to Threeatre. Press ENTER to chat.');
     }
-    
+
+    createStyles() {
+        if (document.getElementById('chat-styles')) return;
+        const style = document.createElement('style');
+        style.id = 'chat-styles';
+        style.textContent = `
+            #game-chat { position:fixed; bottom:0; left:0; width:420px; max-width:45vw; z-index:300; pointer-events:none; font-family:'Consolas','Monaco','Courier New',monospace; }
+            #game-chat * { pointer-events:auto; }
+            #chat-log { max-height:220px; overflow-y:auto; padding:6px 10px; scrollbar-width:none; }
+            #chat-log::-webkit-scrollbar { display:none; }
+            #chat-log .msg { padding:2px 0; line-height:1.4; font-size:13px; text-shadow:1px 1px 2px rgba(0,0,0,0.9); transition:opacity 0.5s; }
+            #chat-log .msg.faded { opacity:0.35; }
+            #chat-input-row { display:none; padding:4px 8px 8px; }
+            #chat-input-row.active { display:flex; gap:6px; align-items:center; }
+            #chat-input-field { flex:1; background:rgba(0,0,0,0.7); border:1px solid rgba(255,255,255,0.25); border-radius:3px; padding:5px 8px; color:#fff; font-family:inherit; font-size:13px; outline:none; }
+            #chat-input-field:focus { border-color:rgba(255,255,100,0.6); }
+            #chat-input-label { color:#aaa; font-size:12px; white-space:nowrap; }
+            #chat-hint { padding:2px 10px 6px; font-size:11px; color:rgba(255,255,255,0.3); }
+            #chat-bg { position:absolute; bottom:0; left:0; width:100%; height:100%; background:linear-gradient(to top,rgba(0,0,0,0.55) 0%,rgba(0,0,0,0.3) 60%,transparent 100%); pointer-events:none; border-radius:0 8px 0 0; }
+            #voice-btn { position:fixed; bottom:10px; left:430px; background:rgba(0,0,0,0.5); border:1px solid rgba(255,255,255,0.2); border-radius:4px; color:#aaa; padding:4px 10px; font-size:12px; cursor:pointer; z-index:301; font-family:inherit; }
+            #voice-btn:hover { border-color:rgba(255,255,255,0.5); color:#fff; }
+            #voice-btn.active { color:#4f4; border-color:rgba(0,255,0,0.4); }
+            @media (max-width:600px) { #game-chat { max-width:90vw; width:90vw; } #voice-btn { left:auto; right:10px; bottom:10px; } }
+        `;
+        document.head.appendChild(style);
+    }
+
     createChatUI() {
-        // Create chat container
-        const chatContainer = document.createElement('div');
-        chatContainer.id = 'chat-container';
-        chatContainer.style.cssText = `
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            width: 320px;
-            height: 200px;
-            background: rgba(0, 0, 0, 0.15);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 16px;
-            backdrop-filter: blur(20px);
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-            display: flex;
-            flex-direction: column;
-            transform: translateY(100%);
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            z-index: 200;
-        `;
-        
-        // Chat header
-        const chatHeader = document.createElement('div');
-        chatHeader.style.cssText = `
-            padding: 12px 16px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-            color: #00ffff;
-            font-size: 14px;
-            font-weight: 500;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        `;
-        chatHeader.innerHTML = `
-            💬 Theatre Chat
-            <div>
-                <button id="voice-toggle" style="background: none; border: 1px solid rgba(0, 255, 255, 0.3); color: #00ffff; padding: 4px 8px; border-radius: 6px; cursor: pointer; margin-right: 8px;">🎤</button>
-                <button id="chat-close" style="background: none; border: none; color: #ff6666; cursor: pointer; font-size: 16px;">×</button>
+        const existing = document.getElementById('chat-container');
+        if (existing) existing.remove();
+        const existingToggle = document.getElementById('chat-toggle');
+        if (existingToggle) existingToggle.remove();
+
+        const chat = document.createElement('div');
+        chat.id = 'game-chat';
+        chat.innerHTML = `
+            <div id="chat-bg"></div>
+            <div id="chat-log"></div>
+            <div id="chat-input-row">
+                <span id="chat-input-label">Say:</span>
+                <input id="chat-input-field" type="text" maxlength="200" autocomplete="off" />
             </div>
+            <div id="chat-hint">Press ENTER to chat</div>
         `;
-        
-        // Chat messages area
-        const chatMessages = document.createElement('div');
-        chatMessages.id = 'chat-messages';
-        chatMessages.style.cssText = `
-            flex: 1;
-            padding: 12px;
-            overflow-y: auto;
-            font-size: 13px;
-            color: #e0e0e0;
-            scrollbar-width: thin;
-            scrollbar-color: rgba(0, 255, 255, 0.3) transparent;
-        `;
-        
-        // Chat input area
-        const chatInputArea = document.createElement('div');
-        chatInputArea.style.cssText = `
-            padding: 12px;
-            border-top: 1px solid rgba(255, 255, 255, 0.1);
-            display: flex;
-            gap: 8px;
-        `;
-        
-        const chatInput = document.createElement('input');
-        chatInput.id = 'chat-input';
-        chatInput.type = 'text';
-        chatInput.placeholder = 'Type a message...';
-        chatInput.style.cssText = `
-            flex: 1;
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 8px;
-            padding: 8px 12px;
-            color: #fff;
-            font-size: 13px;
-            outline: none;
-        `;
-        
-        const sendButton = document.createElement('button');
-        sendButton.id = 'chat-send';
-        sendButton.textContent = '→';
-        sendButton.style.cssText = `
-            background: rgba(0, 255, 255, 0.2);
-            border: 1px solid rgba(0, 255, 255, 0.3);
-            border-radius: 8px;
-            color: #00ffff;
-            padding: 8px 12px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: bold;
-        `;
-        
-        chatInputArea.appendChild(chatInput);
-        chatInputArea.appendChild(sendButton);
-        
-        chatContainer.appendChild(chatHeader);
-        chatContainer.appendChild(chatMessages);
-        chatContainer.appendChild(chatInputArea);
-        
-        // Chat toggle button
-        const chatToggle = document.createElement('button');
-        chatToggle.id = 'chat-toggle';
-        chatToggle.textContent = '💬';
-        chatToggle.style.cssText = `
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            width: 50px;
-            height: 50px;
-            background: rgba(0, 255, 255, 0.2);
-            border: 1px solid rgba(0, 255, 255, 0.3);
-            border-radius: 50%;
-            color: #00ffff;
-            font-size: 20px;
-            cursor: pointer;
-            z-index: 201;
-            transition: all 0.3s ease;
-            backdrop-filter: blur(10px);
-        `;
-        
-        document.body.appendChild(chatContainer);
-        document.body.appendChild(chatToggle);
-        
-        // Add welcome message
-        this.addSystemMessage('Welcome to Threeatre! Use voice or text to chat with others.');
+        document.body.appendChild(chat);
+
+        const voiceBtn = document.createElement('button');
+        voiceBtn.id = 'voice-btn';
+        voiceBtn.textContent = 'Voice Off';
+        document.body.appendChild(voiceBtn);
     }
-    
+
     setupEventListeners() {
-        // Chat toggle
-        document.getElementById('chat-toggle').addEventListener('click', () => {
-            this.toggleChat();
-        });
-        
-        // Chat close
-        document.getElementById('chat-close').addEventListener('click', () => {
-            this.hideChat();
-        });
-        
-        // Send message
-        document.getElementById('chat-send').addEventListener('click', () => {
-            this.sendMessage();
-        });
-        
-        // Enter key to send
-        document.getElementById('chat-input').addEventListener('keypress', (e) => {
+        document.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
-                this.sendMessage();
-            }
-        });
-        
-        // Voice toggle
-        document.getElementById('voice-toggle').addEventListener('click', () => {
-            this.toggleVoiceChat();
-        });
-        
-        // Network message handlers
-        if (this.networkManager && this.networkManager.socket) {
-            this.networkManager.socket.on('chat-message', (data) => {
-                this.addMessage(data.userId, data.message, data.userName);
-            });
-            
-            this.networkManager.socket.on('voice-offer', (data) => {
-                this.handleVoiceOffer(data);
-            });
-            
-            this.networkManager.socket.on('voice-answer', (data) => {
-                this.handleVoiceAnswer(data);
-            });
-            
-            this.networkManager.socket.on('voice-ice-candidate', (data) => {
-                this.handleIceCandidate(data);
-            });
-        }
-    }
-    
-    toggleChat() {
-        const container = document.getElementById('chat-container');
-        const toggle = document.getElementById('chat-toggle');
-        
-        this.chatVisible = !this.chatVisible;
-        
-        if (this.chatVisible) {
-            container.style.transform = 'translateY(0)';
-            toggle.style.opacity = '0.5';
-        } else {
-            container.style.transform = 'translateY(100%)';
-            toggle.style.opacity = '1';
-        }
-    }
-    
-    hideChat() {
-        this.chatVisible = false;
-        document.getElementById('chat-container').style.transform = 'translateY(100%)';
-        document.getElementById('chat-toggle').style.opacity = '1';
-    }
-    
-    sendMessage() {
-        const input = document.getElementById('chat-input');
-        const message = input.value.trim();
-        
-        if (!message) return;
-        
-        // Send to network
-        if (this.networkManager && this.networkManager.socket) {
-            this.networkManager.socket.emit('chat-message', {
-                roomId: this.networkManager.roomId,
-                message: message,
-                userName: `User ${this.networkManager.userId.slice(-4)}`
-            });
-        }
-        
-        // Add to local chat
-        this.addMessage(this.networkManager.userId, message, 'You', true);
-        
-        input.value = '';
-    }
-    
-    addMessage(userId, message, userName = null, isLocal = false) {
-        const messagesContainer = document.getElementById('chat-messages');
-        
-        const messageDiv = document.createElement('div');
-        messageDiv.style.cssText = `
-            margin-bottom: 8px;
-            padding: 6px 10px;
-            border-radius: 8px;
-            background: ${isLocal ? 'rgba(0, 255, 255, 0.1)' : 'rgba(255, 255, 255, 0.05)'};
-            border-left: 3px solid ${isLocal ? '#00ffff' : '#4CAF50'};
-        `;
-        
-        const displayName = userName || `User ${userId.slice(-4)}`;
-        const timestamp = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-        
-        messageDiv.innerHTML = `
-            <div style="font-size: 11px; opacity: 0.7; margin-bottom: 2px;">
-                <span style="color: ${isLocal ? '#00ffff' : '#4CAF50'};">${displayName}</span>
-                <span style="float: right;">${timestamp}</span>
-            </div>
-            <div>${this.escapeHtml(message)}</div>
-        `;
-        
-        messagesContainer.appendChild(messageDiv);
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        
-        // Limit message history
-        while (messagesContainer.children.length > 50) {
-            messagesContainer.removeChild(messagesContainer.firstChild);
-        }
-    }
-    
-    addSystemMessage(message) {
-        const messagesContainer = document.getElementById('chat-messages');
-        
-        const messageDiv = document.createElement('div');
-        messageDiv.style.cssText = `
-            margin-bottom: 8px;
-            padding: 6px 10px;
-            border-radius: 8px;
-            background: rgba(255, 255, 255, 0.02);
-            border-left: 3px solid #666;
-            font-style: italic;
-            opacity: 0.8;
-            font-size: 12px;
-        `;
-        
-        messageDiv.textContent = message;
-        messagesContainer.appendChild(messageDiv);
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-    }
-    
-    escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
-    
-    async setupVoiceChat() {
-        try {
-            // Check if WebRTC is supported
-            if (!window.RTCPeerConnection) {
-                console.warn('WebRTC not supported');
+                e.preventDefault();
+                if (this.isTyping) {
+                    this.sendMessage();
+                } else {
+                    this.openInput();
+                }
                 return;
             }
-            
-            console.log('Voice chat system initialized');
-        } catch (error) {
-            console.error('Error setting up voice chat:', error);
+            if (e.key === 'Escape' && this.isTyping) {
+                e.preventDefault();
+                this.closeInput();
+                return;
+            }
+        });
+
+        const input = document.getElementById('chat-input-field');
+        input.addEventListener('blur', () => {
+            setTimeout(() => this.closeInput(), 100);
+        });
+
+        input.addEventListener('keydown', (e) => {
+            e.stopPropagation();
+        });
+        input.addEventListener('keyup', (e) => {
+            e.stopPropagation();
+        });
+        input.addEventListener('keypress', (e) => {
+            e.stopPropagation();
+        });
+
+        document.getElementById('voice-btn').addEventListener('click', () => {
+            this.toggleVoiceChat();
+        });
+
+        if (this.networkManager?.socket) {
+            this.networkManager.socket.on('chat-message', (data) => {
+                this.addMessage(data.message, data.userName || `Anon_${data.userId?.slice(-4) || '????'}`, '#6f6');
+            });
+            this.networkManager.socket.on('user-joined', (data) => {
+                this.addSystemMessage(`${data.id?.slice(-4) || 'Someone'} entered the theatre.`);
+            });
+            this.networkManager.socket.on('user-left', (userId) => {
+                this.addSystemMessage(`${userId?.slice(-4) || 'Someone'} left.`);
+            });
+            this.networkManager.socket.on('voice-offer', (data) => this.handleVoiceOffer(data));
+            this.networkManager.socket.on('voice-answer', (data) => this.handleVoiceAnswer(data));
+            this.networkManager.socket.on('voice-ice-candidate', (data) => this.handleIceCandidate(data));
         }
     }
-    
+
+    openInput() {
+        this.isTyping = true;
+        const row = document.getElementById('chat-input-row');
+        const hint = document.getElementById('chat-hint');
+        const field = document.getElementById('chat-input-field');
+        row.classList.add('active');
+        hint.style.display = 'none';
+        field.value = '';
+        field.focus();
+        this.unfadeAll();
+    }
+
+    closeInput() {
+        this.isTyping = false;
+        const row = document.getElementById('chat-input-row');
+        const hint = document.getElementById('chat-hint');
+        row.classList.remove('active');
+        hint.style.display = '';
+        document.getElementById('chat-input-field').blur();
+        this.scheduleFade();
+    }
+
+    sendMessage() {
+        const field = document.getElementById('chat-input-field');
+        const text = field.value.trim();
+        this.closeInput();
+        if (!text) return;
+
+        if (text.startsWith('/name ')) {
+            const newName = text.slice(6).trim().slice(0, 20);
+            if (newName) {
+                this.userName = newName;
+                this.addSystemMessage(`Name changed to ${newName}`);
+            }
+            return;
+        }
+
+        this.addMessage(text, this.userName, '#ff0');
+
+        if (this.networkManager?.socket) {
+            this.networkManager.socket.emit('chat-message', {
+                roomId: this.networkManager.roomId,
+                message: text,
+                userName: this.userName
+            });
+        }
+    }
+
+    addMessage(text, sender, senderColor = '#ccc') {
+        const log = document.getElementById('chat-log');
+        const div = document.createElement('div');
+        div.className = 'msg';
+        div.innerHTML = `<span style="color:${senderColor};font-weight:bold;">[${this.escapeHtml(sender)}]</span> ${this.escapeHtml(text)}`;
+        log.appendChild(div);
+        this.trimLog(log);
+        log.scrollTop = log.scrollHeight;
+        this.unfadeAll();
+        this.scheduleFade();
+    }
+
+    addSystemMessage(text) {
+        const log = document.getElementById('chat-log');
+        const div = document.createElement('div');
+        div.className = 'msg';
+        div.innerHTML = `<span style="color:#888;font-style:italic;">${this.escapeHtml(text)}</span>`;
+        log.appendChild(div);
+        this.trimLog(log);
+        log.scrollTop = log.scrollHeight;
+        this.unfadeAll();
+        this.scheduleFade();
+    }
+
+    trimLog(log) {
+        while (log.children.length > this.maxMessages) {
+            log.removeChild(log.firstChild);
+        }
+    }
+
+    unfadeAll() {
+        if (this.fadeTimeout) clearTimeout(this.fadeTimeout);
+        document.querySelectorAll('#chat-log .msg').forEach(m => m.classList.remove('faded'));
+    }
+
+    scheduleFade() {
+        if (this.fadeTimeout) clearTimeout(this.fadeTimeout);
+        this.fadeTimeout = setTimeout(() => {
+            if (this.isTyping) return;
+            document.querySelectorAll('#chat-log .msg').forEach(m => m.classList.add('faded'));
+        }, 8000);
+    }
+
+    escapeHtml(text) {
+        const d = document.createElement('div');
+        d.textContent = text;
+        return d.innerHTML;
+    }
+
+    // --- Voice chat (kept from original) ---
+
+    async setupVoiceChat() {
+        if (!window.RTCPeerConnection) console.warn('WebRTC not supported');
+    }
+
     async toggleVoiceChat() {
-        const voiceButton = document.getElementById('voice-toggle');
-        
+        const btn = document.getElementById('voice-btn');
         if (!this.isVoiceChatEnabled) {
             try {
-                // Request microphone access
-                this.localStream = await navigator.mediaDevices.getUserMedia({ 
-                    audio: {
-                        echoCancellation: true,
-                        noiseSuppression: true,
-                        autoGainControl: true
-                    } 
-                });
-                
+                this.localStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
                 this.isVoiceChatEnabled = true;
-                voiceButton.style.background = 'rgba(0, 255, 0, 0.3)';
-                voiceButton.style.borderColor = 'rgba(0, 255, 0, 0.5)';
-                voiceButton.textContent = '🎤';
-                
-                this.addSystemMessage('Voice chat enabled - you can now talk to others!');
-                
-                // Notify other users
+                btn.textContent = 'Voice ON';
+                btn.classList.add('active');
+                this.addSystemMessage('Voice chat enabled.');
                 this.broadcastVoiceStatus(true);
-                
-            } catch (error) {
-                console.error('Error accessing microphone:', error);
-                this.addSystemMessage('Could not access microphone. Please check permissions.');
+            } catch (err) {
+                this.addSystemMessage('Mic access denied.');
             }
         } else {
-            // Disable voice chat
-            if (this.localStream) {
-                this.localStream.getTracks().forEach(track => track.stop());
-                this.localStream = null;
-            }
-            
-            // Close all peer connections
+            if (this.localStream) { this.localStream.getTracks().forEach(t => t.stop()); this.localStream = null; }
             this.peerConnections.forEach(pc => pc.close());
             this.peerConnections.clear();
-            
             this.isVoiceChatEnabled = false;
-            voiceButton.style.background = 'rgba(255, 255, 255, 0.1)';
-            voiceButton.style.borderColor = 'rgba(0, 255, 255, 0.3)';
-            voiceButton.textContent = '🎤';
-            
-            this.addSystemMessage('Voice chat disabled');
+            btn.textContent = 'Voice Off';
+            btn.classList.remove('active');
+            this.addSystemMessage('Voice chat disabled.');
             this.broadcastVoiceStatus(false);
         }
     }
-    
+
     broadcastVoiceStatus(enabled) {
-        if (this.networkManager && this.networkManager.socket) {
-            this.networkManager.socket.emit('voice-status', {
-                roomId: this.networkManager.roomId,
-                enabled: enabled
-            });
-        }
+        this.networkManager?.socket?.emit('voice-status', { roomId: this.networkManager.roomId, enabled });
     }
-    
+
     async createPeerConnection(userId) {
-        const pc = new RTCPeerConnection({
-            iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' }
-            ]
-        });
-        
-        // Add local stream
-        if (this.localStream) {
-            this.localStream.getTracks().forEach(track => {
-                pc.addTrack(track, this.localStream);
-            });
-        }
-        
-        // Handle remote stream
-        pc.ontrack = (event) => {
-            const remoteStream = event.streams[0];
-            this.handleRemoteStream(userId, remoteStream);
-        };
-        
-        // Handle ICE candidates
-        pc.onicecandidate = (event) => {
-            if (event.candidate) {
-                this.networkManager.socket.emit('voice-ice-candidate', {
-                    roomId: this.networkManager.roomId,
-                    targetUserId: userId,
-                    candidate: event.candidate
-                });
-            }
-        };
-        
+        const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }] });
+        if (this.localStream) this.localStream.getTracks().forEach(t => pc.addTrack(t, this.localStream));
+        pc.ontrack = (e) => this.handleRemoteStream(userId, e.streams[0]);
+        pc.onicecandidate = (e) => { if (e.candidate) this.networkManager.socket.emit('voice-ice-candidate', { roomId: this.networkManager.roomId, targetUserId: userId, candidate: e.candidate }); };
         this.peerConnections.set(userId, pc);
         return pc;
     }
-    
+
     handleRemoteStream(userId, stream) {
-        // Create 3D positional audio for the user
-        if (!this.scene) return;
-        
         const audio = document.createElement('audio');
         audio.srcObject = stream;
         audio.autoplay = true;
-        
-        // Find user avatar for positional audio
-        const userAvatar = this.findUserAvatar(userId);
-        if (userAvatar) {
-            // Create Three.js positional audio
-            const listener = this.scene.getObjectByName('audio-listener');
-            if (listener) {
-                const positionalAudio = new THREE.PositionalAudio(listener);
-                positionalAudio.setMediaElementSource(audio);
-                positionalAudio.setRefDistance(5);
-                positionalAudio.setRolloffFactor(2);
-                
-                userAvatar.add(positionalAudio);
-                
-                this.voiceUsers.set(userId, {
-                    audio: positionalAudio,
-                    element: audio
-                });
-                
-                console.log(`Voice chat connected with user ${userId}`);
-            }
-        }
+        this.voiceUsers.set(userId, { element: audio });
     }
-    
-    findUserAvatar(userId) {
-        // Find the user's avatar in the scene
-        let foundAvatar = null;
-        this.scene.traverse((child) => {
-            if (child.userData && child.userData.userId === userId) {
-                foundAvatar = child;
-            }
-        });
-        return foundAvatar;
-    }
-    
+
     async handleVoiceOffer(data) {
         if (!this.isVoiceChatEnabled) return;
-        
         const pc = await this.createPeerConnection(data.fromUserId);
-        
         await pc.setRemoteDescription(data.offer);
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        
-        this.networkManager.socket.emit('voice-answer', {
-            roomId: this.networkManager.roomId,
-            targetUserId: data.fromUserId,
-            answer: answer
-        });
+        this.networkManager.socket.emit('voice-answer', { roomId: this.networkManager.roomId, targetUserId: data.fromUserId, answer });
     }
-    
+
     async handleVoiceAnswer(data) {
         const pc = this.peerConnections.get(data.fromUserId);
-        if (pc) {
-            await pc.setRemoteDescription(data.answer);
-        }
+        if (pc) await pc.setRemoteDescription(data.answer);
     }
-    
+
     async handleIceCandidate(data) {
         const pc = this.peerConnections.get(data.fromUserId);
-        if (pc) {
-            await pc.addIceCandidate(data.candidate);
-        }
+        if (pc) await pc.addIceCandidate(data.candidate);
     }
-    
+
     async initiateVoiceCall(userId) {
         if (!this.isVoiceChatEnabled) return;
-        
         const pc = await this.createPeerConnection(userId);
-        
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-        
-        this.networkManager.socket.emit('voice-offer', {
-            roomId: this.networkManager.roomId,
-            targetUserId: userId,
-            offer: offer
-        });
+        this.networkManager.socket.emit('voice-offer', { roomId: this.networkManager.roomId, targetUserId: userId, offer });
     }
-    
+
     showChat() {
-        this.chatVisible = true;
-        document.getElementById('chat-container').style.transform = 'translateY(0)';
-        document.getElementById('chat-toggle').style.opacity = '0.5';
-        
-        // Focus input
-        setTimeout(() => {
-            document.getElementById('chat-input').focus();
-        }, 300);
+        this.openInput();
     }
-    
+
     dispose() {
-        // Clean up voice chat
-        if (this.localStream) {
-            this.localStream.getTracks().forEach(track => track.stop());
-        }
-        
+        if (this.localStream) this.localStream.getTracks().forEach(t => t.stop());
         this.peerConnections.forEach(pc => pc.close());
         this.peerConnections.clear();
-        
-        // Remove UI elements
-        const chatContainer = document.getElementById('chat-container');
-        const chatToggle = document.getElementById('chat-toggle');
-        
-        if (chatContainer) document.body.removeChild(chatContainer);
-        if (chatToggle) document.body.removeChild(chatToggle);
+        const el = document.getElementById('game-chat');
+        if (el) el.remove();
+        const btn = document.getElementById('voice-btn');
+        if (btn) btn.remove();
+        const styles = document.getElementById('chat-styles');
+        if (styles) styles.remove();
     }
 }
