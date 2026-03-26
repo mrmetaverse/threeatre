@@ -140,7 +140,6 @@ export class RoguelikeWorld {
         tile.position.set(tileX * this.groundTileSize, -0.05, tileZ * this.groundTileSize);
         tile.receiveShadow = true;
         tile.userData.isGroundTile = true;
-        this.applyStaticOMICollider(tile, { type: 'box', size: [this.groundTileSize, 0.8, this.groundTileSize] });
         this.scene.add(tile);
         this.worldObjects.push(tile);
         return tile;
@@ -228,75 +227,44 @@ export class RoguelikeWorld {
     }
 
     buildReturnTheatreLandmark() {
+        // Keep the real theatre visible; only add subtle return beacons outside the door.
         const theatreLandmark = new THREE.Group();
         theatreLandmark.position.set(0, 0, 70);
         theatreLandmark.name = 'outside-theatre-landmark';
         theatreLandmark.userData.noCollision = true;
 
-        const base = new THREE.Mesh(
-            new THREE.BoxGeometry(54, 20, 36),
-            new THREE.MeshLambertMaterial({ color: 0x2f261d })
-        );
-        base.position.set(0, 10, -12);
-        base.userData.noCollision = true;
-        theatreLandmark.add(base);
-
-        const roof = new THREE.Mesh(
-            new THREE.ConeGeometry(36, 14, 4),
-            new THREE.MeshLambertMaterial({ color: 0x231a12 })
-        );
-        roof.position.set(0, 26, -12);
-        roof.rotation.y = Math.PI * 0.25;
-        roof.userData.noCollision = true;
-        theatreLandmark.add(roof);
-
-        const screenFacade = new THREE.Mesh(
-            new THREE.PlaneGeometry(22, 12),
-            new THREE.MeshBasicMaterial({ color: 0x3a5066 })
-        );
-        screenFacade.position.set(0, 13, -29.4);
-        screenFacade.userData.noCollision = true;
-        theatreLandmark.add(screenFacade);
-
-        const entranceGlow = new THREE.Mesh(
-            new THREE.PlaneGeometry(12, 16),
-            new THREE.MeshBasicMaterial({ color: 0x00ffcc, transparent: true, opacity: 0.72 })
-        );
-        entranceGlow.position.set(0, 8, 0.1);
-        entranceGlow.userData.noCollision = true;
-        theatreLandmark.add(entranceGlow);
-
         const portalRing = new THREE.Mesh(
             new THREE.TorusGeometry(4.2, 0.5, 16, 36),
-            new THREE.MeshBasicMaterial({ color: 0x00ffcc, transparent: true, opacity: 0.8 })
+            new THREE.MeshBasicMaterial({ color: 0x00ffcc, transparent: true, opacity: 0.6 })
         );
-        portalRing.position.set(0, 8, 0.3);
+        portalRing.position.set(0, 3.4, -6);
+        portalRing.rotation.x = Math.PI / 2;
         portalRing.userData.noCollision = true;
         theatreLandmark.add(portalRing);
 
         const returnBeacon = new THREE.Mesh(
-            new THREE.CylinderGeometry(1.4, 4.5, 62, 12, 1, true),
+            new THREE.CylinderGeometry(0.9, 2.2, 50, 10, 1, true),
             new THREE.MeshBasicMaterial({
                 color: 0x00ffcc,
                 transparent: true,
-                opacity: 0.12,
+                opacity: 0.09,
                 side: THREE.DoubleSide
             })
         );
-        returnBeacon.position.set(0, 34, 1);
+        returnBeacon.position.set(0, 25, -6);
         returnBeacon.userData.noCollision = true;
         theatreLandmark.add(returnBeacon);
 
         this.scene.add(theatreLandmark);
         this.worldObjects.push(theatreLandmark);
 
-        const portalLight = new THREE.PointLight(0x00ffcc, 3, 70);
-        portalLight.position.set(0, 10, 70);
+        const portalLight = new THREE.PointLight(0x00ffcc, 2.3, 60);
+        portalLight.position.set(0, 7, 64);
         this.scene.add(portalLight);
         this.worldLights.push(portalLight);
 
-        const theatreTopLight = new THREE.PointLight(0x88ccff, 2.5, 120);
-        theatreTopLight.position.set(0, 29, 58);
+        const theatreTopLight = new THREE.PointLight(0x88ccff, 2.0, 90);
+        theatreTopLight.position.set(0, 24, 60);
         this.scene.add(theatreTopLight);
         this.worldLights.push(theatreTopLight);
     }
@@ -1120,11 +1088,23 @@ export class RoguelikeWorld {
 
         const maxDecorDistance = 420;
         const maxTempleDistance = 720;
+        const intersectsFrustumSafe = (obj) => {
+            if (!obj || !obj.visible) return false;
+            if (obj.isMesh && obj.geometry) {
+                if (!obj.geometry.boundingSphere) {
+                    obj.geometry.computeBoundingSphere();
+                }
+                return this._outsideCullFrustum.intersectsObject(obj);
+            }
+            const box = new THREE.Box3().setFromObject(obj);
+            if (box.isEmpty()) return false;
+            return this._outsideCullFrustum.intersectsBox(box);
+        };
 
         this.temples.forEach((temple) => {
             if (!temple?.group) return;
             const dist = temple.position.distanceTo(playerPosition);
-            const inFrustum = this._outsideCullFrustum.intersectsObject(temple.group);
+            const inFrustum = intersectsFrustumSafe(temple.group);
             const visible = dist <= maxTempleDistance && inFrustum;
             temple.group.visible = visible;
             if (temple.chest) temple.chest.visible = visible;
@@ -1144,14 +1124,14 @@ export class RoguelikeWorld {
                 return;
             }
             const dist = obj.position ? obj.position.distanceTo(playerPosition) : 0;
-            const inFrustum = this._outsideCullFrustum.intersectsObject(obj);
+            const inFrustum = intersectsFrustumSafe(obj);
             obj.visible = dist <= maxDecorDistance && inFrustum;
         });
 
         this.ghosts.forEach((ghost) => {
             if (!ghost?.mesh) return;
             const dist = ghost.position.distanceTo(playerPosition);
-            const inFrustum = this._outsideCullFrustum.intersectsObject(ghost.mesh);
+            const inFrustum = intersectsFrustumSafe(ghost.mesh);
             ghost.mesh.visible = dist <= 260 && inFrustum;
         });
     }
@@ -1473,13 +1453,14 @@ export class RoguelikeWorld {
     }
 
     enterWorld(playerPosition) {
-        this.hideTheatre();
-        this.buildWorld();
-        this.enterTimestamp = Date.now();
-        if (this.theatre.camera) this.theatre.camera.position.set(0, 1.6, 88);
-        if (this.theatre.networkManager && this.theatre.camera) {
-            this.theatre.networkManager.updatePosition(this.theatre.camera.position);
+        if (this.worldObjects.length === 0) {
+            this.buildWorld();
         }
+        this.isActive = true;
+        this.enterTimestamp = Date.now();
+        this.showOutsideStateOverlay();
+        this.showTheatreCompass();
+        this.setupSpookySpatialAudio();
         this.showWorldWarning();
     }
 
@@ -1593,10 +1574,6 @@ export class RoguelikeWorld {
 
     hideWorld() {
         this.clearSpookySpatialAudio();
-        this.worldObjects.forEach(o => { if (o.visible !== undefined) o.visible = false; this.scene.remove(o); });
-        this.ghosts.forEach(g => { g.mesh.visible = false; this.scene.remove(g.mesh); });
-        this.treasureChests.forEach(tc => { tc.mesh.visible = false; this.scene.remove(tc.mesh); });
-        this.worldLights.forEach(l => this.scene.remove(l));
         const outside = document.getElementById('outside-state-overlay');
         if (outside) outside.remove();
         this.hideTheatreCompass();
@@ -1605,7 +1582,6 @@ export class RoguelikeWorld {
         else this.scene.background = new THREE.Color(0x000011);
         this.scene.fog = this.savedFog || null;
 
-        this.showTheatre();
         this.isActive = false;
     }
 
@@ -1638,19 +1614,21 @@ export class RoguelikeWorld {
     checkExitCollision(playerPosition) {
         if (!this.theatre.exitPortal) return false;
         const portalPos = this.theatre.exitPortal.position;
-        const dx = playerPosition.x - portalPos.x;
-        const dz = playerPosition.z - portalPos.z;
-        const xzDist = Math.sqrt(dx * dx + dz * dz);
-        // Primary portal trigger (legacy precise check)
-        if (xzDist < 6 && playerPosition.z > 55) return true;
+        const dx = Math.abs(playerPosition.x - portalPos.x);
+        const nearDoorX = dx < 10.5;
+        const nearDoorHeight = playerPosition.y < 24;
+        const justPastDoor = playerPosition.z > (portalPos.z + 1.8);
+        return nearDoorX && nearDoorHeight && justPastDoor;
+    }
 
-        // Failsafe trigger: any player walking through the central doorway
-        // should enter outside mode even if they miss the exact portal center.
-        const inDoorwayX = Math.abs(playerPosition.x) < 16;
-        const pastThresholdZ = playerPosition.z > 58;
-        if (inDoorwayX && pastThresholdZ) return true;
-
-        return false;
+    checkInteriorCollision(playerPosition) {
+        if (!this.theatre.exitPortal) return false;
+        const portalPos = this.theatre.exitPortal.position;
+        const dx = Math.abs(playerPosition.x - portalPos.x);
+        const nearDoorX = dx < 10.5;
+        const nearDoorHeight = playerPosition.y < 24;
+        const backInside = playerPosition.z < (portalPos.z - 2.2);
+        return nearDoorX && nearDoorHeight && backInside;
     }
 
     checkReturnCollision(playerPosition) {

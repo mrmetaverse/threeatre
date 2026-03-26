@@ -28,6 +28,10 @@ export class Theatre {
         this._avatarCullDistance = 140;
         this._lastCullUpdateMs = 0;
         this._cullUpdateIntervalMs = 150;
+        this.theatreSpeakerAnchors = [];
+        this.theatreSpeakerAudioNodes = [];
+        this._theatreSpeakerAudioUnlocked = false;
+        this._theatreSpeakerBaseVolume = 0.22;
         
         this.init();
     }
@@ -37,7 +41,122 @@ export class Theatre {
         this.createSeats();
         this.createScreen();
         this.createLighting();
+        this.createSurroundSpeakerFixtures();
         this.setupTheatreAudio();
+    }
+
+    createSurroundSpeakerFixtures() {
+        const focusPoint = new THREE.Vector3(0, 6, -20);
+        const speakerPositions = [
+            // Left wall
+            new THREE.Vector3(-45.2, 8, -38),
+            new THREE.Vector3(-45.2, 10, -18),
+            new THREE.Vector3(-45.2, 10, 4),
+            new THREE.Vector3(-45.2, 8, 26),
+            // Right wall
+            new THREE.Vector3(45.2, 8, -38),
+            new THREE.Vector3(45.2, 10, -18),
+            new THREE.Vector3(45.2, 10, 4),
+            new THREE.Vector3(45.2, 8, 26),
+            // Rear wall
+            new THREE.Vector3(-20, 9, 59),
+            new THREE.Vector3(0, 10, 59),
+            new THREE.Vector3(20, 9, 59)
+        ];
+
+        speakerPositions.forEach((position, index) => {
+            const anchor = new THREE.Object3D();
+            anchor.position.copy(position);
+            anchor.lookAt(focusPoint);
+            anchor.name = `theatre-speaker-${index}`;
+            anchor.userData.noCollision = true;
+
+            const cabinet = new THREE.Mesh(
+                new THREE.BoxGeometry(1.6, 1.2, 1.1),
+                new THREE.MeshLambertMaterial({ color: 0x111111 })
+            );
+            cabinet.castShadow = true;
+            cabinet.receiveShadow = true;
+
+            const cone = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.25, 0.3, 0.15, 18),
+                new THREE.MeshLambertMaterial({ color: 0x2f2f2f })
+            );
+            cone.rotation.x = Math.PI / 2;
+            cone.position.z = 0.55;
+
+            const tweeter = new THREE.Mesh(
+                new THREE.SphereGeometry(0.12, 12, 10),
+                new THREE.MeshLambertMaterial({ color: 0x444444 })
+            );
+            tweeter.position.set(0, 0.25, 0.52);
+
+            anchor.add(cabinet);
+            anchor.add(cone);
+            anchor.add(tweeter);
+            this.scene.add(anchor);
+            this.theatreSpeakerAnchors.push(anchor);
+        });
+    }
+
+    clearTheatreSpeakerAudio() {
+        this.theatreSpeakerAudioNodes.forEach((audioNode) => {
+            if (!audioNode) return;
+            try {
+                audioNode.disconnect();
+            } catch (e) {
+                // no-op
+            }
+            if (audioNode.parent) {
+                audioNode.parent.remove(audioNode);
+            }
+        });
+        this.theatreSpeakerAudioNodes = [];
+        this._theatreSpeakerAudioUnlocked = false;
+    }
+
+    setupTheatreSpeakerAudio(stream) {
+        this.clearTheatreSpeakerAudio();
+
+        const listener = this.avatarManager?.audioListener;
+        if (!listener) return false;
+        if (!stream || stream.getAudioTracks().length === 0) return false;
+        if (this.theatreSpeakerAnchors.length === 0) return false;
+
+        this.theatreSpeakerAnchors.forEach((anchor) => {
+            const speakerAudio = new THREE.PositionalAudio(listener);
+            speakerAudio.setMediaStreamSource(stream);
+            speakerAudio.setDistanceModel('inverse');
+            speakerAudio.setRefDistance(15);
+            speakerAudio.setRolloffFactor(1.2);
+            speakerAudio.setMaxDistance(160);
+            speakerAudio.setDirectionalCone(65, 160, 0.25);
+            speakerAudio.setVolume(0); // unlocked by user gesture
+            anchor.add(speakerAudio);
+            this.theatreSpeakerAudioNodes.push(speakerAudio);
+        });
+
+        return true;
+    }
+
+    async enableTheatreSpeakerAudio() {
+        const listener = this.avatarManager?.audioListener;
+        if (!listener || this.theatreSpeakerAudioNodes.length === 0) return false;
+
+        const audioContext = listener.context;
+        if (audioContext?.state === 'suspended') {
+            try {
+                await audioContext.resume();
+            } catch (e) {
+                // no-op
+            }
+        }
+
+        this.theatreSpeakerAudioNodes.forEach((speakerAudio) => {
+            speakerAudio.setVolume(this._theatreSpeakerBaseVolume);
+        });
+        this._theatreSpeakerAudioUnlocked = true;
+        return true;
     }
 
     applyStaticOMICollider(object3D, collider = {}) {
@@ -73,7 +192,6 @@ export class Theatre {
         mainFloor.position.z = 30;
         mainFloor.receiveShadow = true;
         this.scene.add(mainFloor);
-        this.applyStaticOMICollider(mainFloor, { type: 'box', size: [90, 0.8, 60] });
         
         // Create massive recessed seating floor (lower level)
         const seatingFloorGeometry = new THREE.PlaneGeometry(84, 54);
@@ -86,7 +204,6 @@ export class Theatre {
         seatingFloor.position.set(0, -1.5, -15);
         seatingFloor.receiveShadow = true;
         this.scene.add(seatingFloor);
-        this.applyStaticOMICollider(seatingFloor, { type: 'box', size: [84, 0.8, 54] });
         
         // Create grand steps between levels
         for (let i = 0; i < 8; i++) {
@@ -190,6 +307,7 @@ export class Theatre {
         const doorFrameMaterial = new THREE.MeshLambertMaterial({ color: 0x2a1f15 });
         const doorFrame = new THREE.Mesh(doorFrameGeometry, doorFrameMaterial);
         doorFrame.position.set(0, 18, 62.25);
+        doorFrame.userData.noCollision = true;
         this.scene.add(doorFrame);
         
         // Dark exit portal - imposing gateway
@@ -364,7 +482,6 @@ export class Theatre {
                     occupied: false,
                     userId: null
                 };
-                this.applyStaticOMICollider(seatGroup, { type: 'box', size: [1.7, 2.2, 1.4] });
                 
                 this.seats.push(seatInfo);
                 this.scene.add(seatGroup);
@@ -528,6 +645,7 @@ export class Theatre {
         video.srcObject = stream;
 
         const hasAudio = stream.getAudioTracks().length > 0;
+        const hasSpatialSpeakerRouting = hasAudio && this.setupTheatreSpeakerAudio(stream);
 
         video.addEventListener('loadedmetadata', () => {
             const w = video.videoWidth;
@@ -599,6 +717,11 @@ export class Theatre {
         stream.getTracks().forEach(track => {
             track.addEventListener('ended', () => this.stopHostStream());
         });
+
+        // Keep direct video element muted; stream audio is routed through theatre speaker emitters.
+        if (hasSpatialSpeakerRouting) {
+            video.muted = true;
+        }
     }
 
     showUnmuteOverlay(video) {
@@ -607,7 +730,7 @@ export class Theatre {
         const overlay = document.createElement('div');
         overlay.id = 'unmute-overlay';
         overlay.style.cssText = `position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.85);border:2px solid #00ffcc;border-radius:12px;padding:14px 28px;color:#00ffcc;font-size:16px;font-weight:bold;cursor:pointer;z-index:500;text-align:center;backdrop-filter:blur(10px);box-shadow:0 0 20px rgba(0,255,200,0.3);animation:unmutePulse 2s infinite;`;
-        overlay.textContent = 'Click to unmute stream audio';
+        overlay.textContent = 'Click to enable theatre surround audio';
 
         if (!document.getElementById('unmute-pulse-style')) {
             const s = document.createElement('style');
@@ -617,9 +740,7 @@ export class Theatre {
         }
 
         overlay.addEventListener('click', () => {
-            video.muted = false;
-            video.volume = 1.0;
-            video.play().catch(() => {});
+            this.enableTheatreSpeakerAudio();
             this.removeUnmuteOverlay();
         });
 
@@ -662,6 +783,7 @@ export class Theatre {
         }
 
         this.removeUnmuteOverlay();
+        this.clearTheatreSpeakerAudio();
 
         this._streamCanvas = null;
         this._streamCtx = null;
@@ -767,7 +889,15 @@ export class Theatre {
     isPositionTooClose(newPosition, minDistance) {
         // Check if the new position is too close to existing avatars
         for (const [userId, user] of this.users) {
-            if (user.position && user.position.distanceTo(newPosition) < minDistance) {
+            if (!user?.position) continue;
+            const userPos = user.position?.isVector3
+                ? user.position
+                : new THREE.Vector3(
+                    Number(user.position.x) || 0,
+                    Number(user.position.y) || 0,
+                    Number(user.position.z) || 0
+                );
+            if (userPos.distanceTo(newPosition) < minDistance) {
                 return true;
             }
         }
@@ -807,11 +937,23 @@ export class Theatre {
     updateUserPosition(userId, position, rotation) {
         const user = this.users.get(userId);
         if (user) {
+            const normalizedPosition = position
+                ? (position.isVector3
+                    ? position
+                    : new THREE.Vector3(
+                        Number(position.x) || 0,
+                        Number(position.y) || 0,
+                        Number(position.z) || 0
+                    ))
+                : null;
+
             // Update avatar using avatar manager
-            this.avatarManager.updateAvatar(userId, position, rotation);
+            this.avatarManager.updateAvatar(userId, normalizedPosition || position, rotation);
             
             // Update user info
-            user.position = position;
+            if (normalizedPosition) {
+                user.position = normalizedPosition.clone();
+            }
             if (rotation) {
                 user.rotation = rotation;
             }
@@ -938,20 +1080,14 @@ export class Theatre {
     }
     
     checkWorldTransitions(playerPosition) {
-        // Check if player wants to exit theatre
+        // Crossing the doorway outward enables outside mode in the same continuous world.
         if (!this.roguelikeWorld.isActive && this.roguelikeWorld.checkExitCollision(playerPosition)) {
             this.roguelikeWorld.enterWorld(playerPosition);
         }
         
-        // Check if player wants to return to theatre
-        if (this.roguelikeWorld.isActive && this.roguelikeWorld.checkReturnCollision(playerPosition)) {
+        // Crossing back through the same doorway disables outside danger mode.
+        if (this.roguelikeWorld.isActive && this.roguelikeWorld.checkInteriorCollision(playerPosition)) {
             this.roguelikeWorld.hideWorld();
-            if (this.camera) {
-                this.camera.position.set(0, 2, 18);
-            }
-            if (this.networkManager && this.camera) {
-                this.networkManager.updatePosition(this.camera.position);
-            }
         }
     }
     
