@@ -13,6 +13,7 @@ export class OMISeat {
     }
     
     sitInSeat(seatInfo) {
+        if (!seatInfo) return false;
         if (this.isSeated) {
             this.standUp();
         }
@@ -228,6 +229,15 @@ export class OMISeat {
 
     update() {
         if (!this.isSeated) return;
+
+        const localId = this.theatre?.networkManager?.userId;
+        const localUser = localId ? this.theatre?.users?.get(localId) : null;
+        const stillHasSeat = localUser && localUser.seatId !== null && localUser.seatId !== undefined;
+        if (!stillHasSeat) {
+            this.standUp();
+            return;
+        }
+
         const avatarScene = this.getLocalAvatarScene();
         if (!avatarScene) return;
 

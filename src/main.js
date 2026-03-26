@@ -1127,7 +1127,18 @@ class TheatreApp {
     
     updateMovement(deltaTime) {
         if (this.renderer.xr.isPresenting) return;
-        if (this.omiSeat && this.omiSeat.isSeated) return;
+        if (this.omiSeat && this.omiSeat.isSeated) {
+            const localId = this.networkManager?.userId;
+            const localUser = localId ? this.theatre.users.get(localId) : null;
+            const stillHasSeat = localUser && localUser.seatId !== null && localUser.seatId !== undefined;
+
+            if (!stillHasSeat) {
+                // Safety recovery: never trap user in seated lock if seat ownership desyncs.
+                this.omiSeat.standUp();
+            } else {
+                return;
+            }
+        }
 
         if (this.mobileInput.enabled) {
             this.yaw -= this.mobileInput.look.x * this.mobileLookSensitivity * deltaTime;
