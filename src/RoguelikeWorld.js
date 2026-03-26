@@ -344,17 +344,20 @@ export class RoguelikeWorld {
             const nearSpawn = i < 5;
             const x = nearSpawn ? (Math.random() - 0.5) * 60 : (Math.random() - 0.5) * 250;
             const z = nearSpawn ? 100 + Math.random() * 50 : 120 + Math.random() * 200;
+            const baseSpeed = 4.2 + Math.random() * 2.8; // units/sec
             ghost.position.set(x, 2, z);
             this.scene.add(ghost);
             this.ghosts.push({
                 mesh: ghost,
                 position: ghost.position.clone(),
                 target: null,
-                speed: 0.015 + Math.random() * 0.02,
+                speed: baseSpeed,
+                baseSpeed: baseSpeed,
                 lastPlayerDistance: Infinity,
-                aggroRange: 45 + Math.random() * 30,
-                killRange: 1.8,
-                health: 2 + Math.floor(Math.random() * 3)
+                aggroRange: 120 + Math.random() * 70,
+                killRange: 2.4,
+                health: 2 + Math.floor(Math.random() * 3),
+                alerted: nearSpawn
             });
         }
     }
@@ -425,10 +428,25 @@ export class RoguelikeWorld {
         if (!this.isActive) return;
 
         const time = Date.now() * 0.001;
+        const dt = Math.min(0.05, Math.max(0.008, deltaTime || 0.016));
+
+        // Pack alert: once one ghost spots the player, nearby ghosts aggro too.
+        if (playerPosition) {
+            this.ghosts.forEach((ghost) => {
+                if (ghost.position.distanceTo(playerPosition) < ghost.aggroRange) {
+                    ghost.alerted = true;
+                    this.ghosts.forEach((other) => {
+                        if (other.position.distanceTo(ghost.position) < 55) {
+                            other.alerted = true;
+                        }
+                    });
+                }
+            });
+        }
 
         this.ghosts.forEach((ghost, index) => {
             if (ghost.health <= 0) { this.removeGhost(index); return; }
-            this.updateGhost(ghost, deltaTime, playerPosition);
+            this.updateGhost(ghost, dt, playerPosition);
         });
 
         this.updateTomatoes(deltaTime);
@@ -476,22 +494,28 @@ export class RoguelikeWorld {
 
         if (dist < ghost.killRange) { this.killPlayer(); return; }
 
-        if (dist < ghost.aggroRange) {
+        const shouldChase = ghost.alerted || dist < ghost.aggroRange;
+
+        if (shouldChase) {
             const dir = new THREE.Vector3().subVectors(playerPosition, ghost.position).normalize();
-            const chaseSpeed = ghost.speed * (1 + (1 - dist / ghost.aggroRange) * 0.5);
-            ghost.position.addScaledVector(dir, chaseSpeed);
+            const norm = 1 - Math.min(dist, ghost.aggroRange) / ghost.aggroRange;
+            const chaseSpeed = ghost.speed * (1 + norm * 1.2);
+            ghost.position.addScaledVector(dir, chaseSpeed * deltaTime);
             ghost.mesh.position.x = ghost.position.x;
             ghost.mesh.position.z = ghost.position.z;
             ghost.mesh.lookAt(playerPosition.x, ghost.mesh.position.y, playerPosition.z);
-            ghost.speed = Math.min(ghost.speed + 0.0005, 0.08);
+            ghost.speed = Math.min(8.6, ghost.speed + 0.9 * deltaTime);
         } else {
             if (Math.random() < 0.02) {
                 const wander = new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
-                ghost.position.addScaledVector(wander, ghost.speed * 0.3);
+                ghost.position.addScaledVector(wander, ghost.baseSpeed * 0.45 * deltaTime);
                 ghost.mesh.position.x = ghost.position.x;
                 ghost.mesh.position.z = ghost.position.z;
             }
-            ghost.speed = Math.max(ghost.speed - 0.0005, 0.015);
+            ghost.speed = Math.max(ghost.baseSpeed, ghost.speed - 0.7 * deltaTime);
+            if (dist > ghost.aggroRange * 1.8) {
+                ghost.alerted = false;
+            }
         }
 
         ghost.position.x = Math.max(-180, Math.min(180, ghost.position.x));
