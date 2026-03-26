@@ -22,6 +22,7 @@ export class RoguelikeWorld {
         this.savedFog = null;
         this.savedBg = null;
         this.worldLights = [];
+        this.hiddenTheatreObjects = [];
         this.exitPosition = new THREE.Vector3(0, 1.6, 70);
         this.enterTimestamp = 0;
         this.returnCooldownMs = 2500;
@@ -38,8 +39,8 @@ export class RoguelikeWorld {
         this.savedBg = this.scene.background?.clone();
         this.savedFog = this.scene.fog;
 
-        this.scene.background = new THREE.Color(0x14203a);
-        this.scene.fog = new THREE.FogExp2(0x1a2a48, 0.0022);
+        this.scene.background = new THREE.Color(0x1a2740);
+        this.scene.fog = new THREE.FogExp2(0x223557, 0.0015);
 
         this.buildGround();
         this.buildAtmosphere();
@@ -50,6 +51,11 @@ export class RoguelikeWorld {
         this.setupWorldLighting();
 
         this.isActive = true;
+        console.log('[RoguelikeWorld] Active:', {
+            worldObjects: this.worldObjects.length,
+            temples: this.temples.length,
+            ghosts: this.ghosts.length
+        });
     }
 
     buildGround() {
@@ -57,13 +63,13 @@ export class RoguelikeWorld {
         canvas.width = 512;
         canvas.height = 512;
         const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#1a1a12';
+        ctx.fillStyle = '#2a2f3a';
         ctx.fillRect(0, 0, 512, 512);
         for (let i = 0; i < 8000; i++) {
             const x = Math.random() * 512;
             const y = Math.random() * 512;
-            const shade = Math.floor(20 + Math.random() * 15);
-            ctx.fillStyle = `rgb(${shade}, ${shade + 2}, ${shade - 5})`;
+            const shade = Math.floor(42 + Math.random() * 20);
+            ctx.fillStyle = `rgb(${shade}, ${shade + 4}, ${shade + 8})`;
             ctx.fillRect(x, y, 2 + Math.random() * 3, 2 + Math.random() * 3);
         }
         const tex = new THREE.CanvasTexture(canvas);
@@ -92,11 +98,10 @@ export class RoguelikeWorld {
         const fogGeo = new THREE.BufferGeometry();
         fogGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
         const fogMat = new THREE.PointsMaterial({
-            color: 0x667788,
-            size: 3,
+            color: 0x9aa9c0,
+            size: 1.3,
             transparent: true,
-            opacity: 0.15,
-            blending: THREE.AdditiveBlending,
+            opacity: 0.06,
             depthWrite: false
         });
         const fogParticles = new THREE.Points(fogGeo, fogMat);
@@ -129,7 +134,7 @@ export class RoguelikeWorld {
 
     buildTemples() {
         const templeConfigs = [
-            { pos: new THREE.Vector3(0, 0, 118), color: 0xff6600, name: 'Ember Shrine', beaconColor: 0xff4400, dist: 'near' },
+            { pos: new THREE.Vector3(0, 0, 102), color: 0xff6600, name: 'Ember Shrine', beaconColor: 0xff4400, dist: 'near' },
             { pos: new THREE.Vector3(-45, 0, 150), color: 0x44aaff, name: 'Frost Sanctum', beaconColor: 0x2288ff, dist: 'mid' },
             { pos: new THREE.Vector3(55, 0, 170), color: 0xaa44ff, name: 'Void Temple', beaconColor: 0x8822ff, dist: 'far' },
             { pos: new THREE.Vector3(-20, 0, 220), color: 0xffdd00, name: 'Golden Ziggurat', beaconColor: 0xffaa00, dist: 'far' },
@@ -286,17 +291,17 @@ export class RoguelikeWorld {
         this.scene.add(moonLight);
         this.worldLights.push(moonLight);
 
-        const ambient = new THREE.AmbientLight(0x2b3f69, 0.9);
+        const ambient = new THREE.AmbientLight(0x405b8f, 1.2);
         this.scene.add(ambient);
         this.worldLights.push(ambient);
 
-        const hemiLight = new THREE.HemisphereLight(0x8ea2dd, 0x27381b, 0.8);
+        const hemiLight = new THREE.HemisphereLight(0xa5b9e8, 0x344928, 1.0);
         this.scene.add(hemiLight);
         this.worldLights.push(hemiLight);
 
         // Strong guide light so the outdoor objective is always visible.
         const guideLight = new THREE.PointLight(0xffaa44, 7, 280);
-        guideLight.position.set(0, 14, 118);
+        guideLight.position.set(0, 14, 102);
         this.scene.add(guideLight);
         this.worldLights.push(guideLight);
 
@@ -309,9 +314,14 @@ export class RoguelikeWorld {
                 side: THREE.DoubleSide
             })
         );
-        guideBeam.position.set(0, 30, 118);
+        guideBeam.position.set(0, 30, 102);
         this.scene.add(guideBeam);
         this.worldObjects.push(guideBeam);
+
+        const spawnFill = new THREE.PointLight(0x88aaff, 3.5, 140);
+        spawnFill.position.set(0, 8, 90);
+        this.scene.add(spawnFill);
+        this.worldLights.push(spawnFill);
 
         const moonGeo = new THREE.SphereGeometry(8, 32, 32);
         const moonMat = new THREE.MeshBasicMaterial({ color: 0xddeeff });
@@ -720,17 +730,23 @@ export class RoguelikeWorld {
     }
 
     hideTheatre() {
-        this.theatre.seats.forEach(s => { s.group.visible = false; });
-        if (this.theatre.screen) this.theatre.screen.visible = false;
-        if (this.theatre.stage) this.theatre.stage.visible = false;
-        this.theatre.walls.forEach(w => { w.visible = false; });
+        // Hide all current theatre renderables/lights except avatar objects.
+        this.hiddenTheatreObjects = [];
+        this.scene.traverse((obj) => {
+            const isAvatarObject = !!obj.userData?.userId || (typeof obj.name === 'string' && obj.name.startsWith('avatar_'));
+            const canHide = obj.visible !== undefined && (obj.isMesh || obj.isPoints || obj.isLine || obj.isLight);
+            if (canHide && !isAvatarObject) {
+                this.hiddenTheatreObjects.push(obj);
+                obj.visible = false;
+            }
+        });
     }
 
     showTheatre() {
-        this.theatre.seats.forEach(s => { s.group.visible = true; });
-        if (this.theatre.screen) this.theatre.screen.visible = true;
-        if (this.theatre.stage) this.theatre.stage.visible = true;
-        this.theatre.walls.forEach(w => { w.visible = true; });
+        this.hiddenTheatreObjects.forEach((obj) => {
+            obj.visible = true;
+        });
+        this.hiddenTheatreObjects = [];
     }
 
     hideWorld() {
