@@ -29,6 +29,7 @@ export class RoguelikeWorld {
         this.returnCooldownMs = 2500;
         this.ghostGracePeriodMs = 7000;
         this.templeSafeRadius = 18;
+        this.theatreSafeRadius = 22;
         this.lastSafeZoneMessageAt = 0;
         this.templeCellSize = 250;
         this.templeGenerationRadius = 1;
@@ -543,7 +544,12 @@ export class RoguelikeWorld {
 
         this.scene.add(group);
         this.worldObjects.push(group);
-        this.applyStaticOMICollider(group, { type: 'cylinder', radius: isGrand ? 24 : 14, height: isGrand ? 28 : 14, translation: [0, 10, 0] });
+        // Allow players to enter temples freely; avoid one giant blocking hull.
+        group.traverse((child) => {
+            if (child.isMesh) {
+                child.userData.noCollision = true;
+            }
+        });
 
         const chestPos = pos.clone();
         chestPos.y = stepsCount * (isGrand ? 0.95 : 0.6) + (isGrand ? 2.6 : 1.5);
@@ -1089,7 +1095,7 @@ export class RoguelikeWorld {
         const maxDecorDistance = 420;
         const maxTempleDistance = 720;
         const intersectsFrustumSafe = (obj) => {
-            if (!obj || !obj.visible) return false;
+            if (!obj) return false;
             if (obj.isMesh && obj.geometry) {
                 if (!obj.geometry.boundingSphere) {
                     obj.geometry.computeBoundingSphere();
@@ -1150,6 +1156,7 @@ export class RoguelikeWorld {
         const inGraceWindow = (Date.now() - this.enterTimestamp) < this.ghostGracePeriodMs;
         const safeTemple = this.getSafeTempleForPosition(playerPosition);
         const playerInSafeZone = !!safeTemple;
+        const playerInTheatreSafeZone = playerPosition.distanceTo(this.exitPosition) <= this.theatreSafeRadius;
         const playerBonuses = this.theatre?.app?.itemBonuses || {};
         const protectionBonus = Math.max(0, Number(playerBonuses.protection || 0));
         const stealthBonus = Math.max(0, Number(playerBonuses.stealth || 0));
@@ -1161,7 +1168,13 @@ export class RoguelikeWorld {
             this.showSafeZoneMessage(safeTemple.name);
         }
 
-        if (!inGraceWindow && !playerInSafeZone && dist < adjustedKillRange) {
+        if (playerInTheatreSafeZone && (Date.now() - this.lastSafeZoneMessageAt) > 2500) {
+            this.lastSafeZoneMessageAt = Date.now();
+            this.showSafeZoneMessage('Theatre perimeter');
+        }
+
+        const playerProtectedZone = playerInSafeZone || playerInTheatreSafeZone;
+        if (!inGraceWindow && !playerProtectedZone && dist < adjustedKillRange) {
             const resistChance = Math.min(0.45, protectionBonus * 0.08);
             if (Math.random() > resistChance) {
                 this.killPlayer();
@@ -1169,7 +1182,7 @@ export class RoguelikeWorld {
             }
         }
 
-        const shouldChase = !playerInSafeZone && (ghost.alerted || dist < adjustedAggroRange);
+        const shouldChase = !playerProtectedZone && (ghost.alerted || dist < adjustedAggroRange);
 
         if (shouldChase) {
             const dir = new THREE.Vector3().subVectors(playerPosition, ghost.position).normalize();
@@ -1182,13 +1195,14 @@ export class RoguelikeWorld {
             ghost.mesh.lookAt(playerPosition.x, ghost.mesh.position.y, playerPosition.z);
             ghost.speed = Math.min(5.2, ghost.speed + 0.55 * deltaTime);
         } else {
-            if (playerInSafeZone) {
-                // Repel ghosts away from temple safe area edge while player is safe.
-                const retreatDir = new THREE.Vector3().subVectors(ghost.position, safeTemple.position).normalize();
+            if (playerProtectedZone) {
+                // Repel ghosts away from safe areas while player is protected.
+                const safeCenter = playerInSafeZone ? safeTemple.position : this.exitPosition;
+                const retreatDir = new THREE.Vector3().subVectors(ghost.position, safeCenter).normalize();
                 ghost.position.addScaledVector(retreatDir, Math.max(2.0, ghost.baseSpeed) * deltaTime);
                 ghost.mesh.position.x = ghost.position.x;
                 ghost.mesh.position.z = ghost.position.z;
-                ghost.mesh.lookAt(safeTemple.position.x, ghost.mesh.position.y, safeTemple.position.z);
+                ghost.mesh.lookAt(safeCenter.x, ghost.mesh.position.y, safeCenter.z);
             }
             if (Math.random() < 0.02) {
                 const wander = new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
@@ -1453,10 +1467,8 @@ export class RoguelikeWorld {
     }
 
     enterWorld(playerPosition) {
-        if (this.worldObjects.length === 0) {
-            this.buildWorld();
-        }
-        this.isActive = true;
+        // Always rebuild on fresh outside entry so ambience/temples are guaranteed visible.
+        this.buildWorld();
         this.enterTimestamp = Date.now();
         this.showOutsideStateOverlay();
         this.showTheatreCompass();
@@ -1615,9 +1627,10 @@ export class RoguelikeWorld {
         if (!this.theatre.exitPortal) return false;
         const portalPos = this.theatre.exitPortal.position;
         const dx = Math.abs(playerPosition.x - portalPos.x);
-        const nearDoorX = dx < 10.5;
+        const nearDoorX = dx < 12.5;
         const nearDoorHeight = playerPosition.y < 24;
-        const justPastDoor = playerPosition.z > (portalPos.z + 1.8);
+        // Must be clearly through the doorway, not just near the front interior rows.
+        const justPastDoor = playerPosition.z > (portalPos.z + 4.5);
         return nearDoorX && nearDoorHeight && justPastDoor;
     }
 
@@ -1625,9 +1638,9 @@ export class RoguelikeWorld {
         if (!this.theatre.exitPortal) return false;
         const portalPos = this.theatre.exitPortal.position;
         const dx = Math.abs(playerPosition.x - portalPos.x);
-        const nearDoorX = dx < 10.5;
+        const nearDoorX = dx < 12.5;
         const nearDoorHeight = playerPosition.y < 24;
-        const backInside = playerPosition.z < (portalPos.z - 2.2);
+        const backInside = playerPosition.z < (portalPos.z - 1.5);
         return nearDoorX && nearDoorHeight && backInside;
     }
 

@@ -911,7 +911,15 @@ class TheatreApp {
             if (event.target.closest('#ui') || event.target.closest('#chat-container')) return;
 
             if (!document.pointerLockElement) {
-                canvas.requestPointerLock();
+                if (!canvas.isConnected || canvas.ownerDocument !== document) return;
+                try {
+                    const lockResult = canvas.requestPointerLock();
+                    if (lockResult && typeof lockResult.catch === 'function') {
+                        lockResult.catch(() => {});
+                    }
+                } catch (e) {
+                    // Browser can throw after HMR reload or invalid document context.
+                }
                 return;
             }
 
@@ -1273,7 +1281,7 @@ class TheatreApp {
 
     isMeshCollidable(mesh) {
         if (!mesh?.geometry) return false;
-        if (!mesh.visible) return false;
+        if (!this.isObjectVisibleInHierarchy(mesh)) return false;
         if (mesh.userData?.noCollision) return false;
 
         const geometryType = mesh.geometry.type || '';
@@ -1285,13 +1293,22 @@ class TheatreApp {
         return true;
     }
 
+    isObjectVisibleInHierarchy(object) {
+        let current = object;
+        while (current) {
+            if (current.visible === false) return false;
+            current = current.parent;
+        }
+        return true;
+    }
+
     getOMIColliderObjects(candidate) {
         const colliderObjects = [];
         if (!candidate?.traverse) return colliderObjects;
         candidate.traverse((child) => {
             const colliderExt = getOMIColliderExtension(child);
             if (!colliderExt) return;
-            if (child.visible === false) return;
+            if (!this.isObjectVisibleInHierarchy(child)) return;
             colliderObjects.push({ object: child, colliderExt });
         });
         return colliderObjects;

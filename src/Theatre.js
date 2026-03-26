@@ -1058,6 +1058,18 @@ export class Theatre {
         this.camera.updateMatrixWorld();
         this._cullProjScreen.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
         this._cullFrustum.setFromProjectionMatrix(this._cullProjScreen);
+        const intersectsAvatarSafe = (avatarObj) => {
+            if (!avatarObj) return false;
+            if (avatarObj.isMesh && avatarObj.geometry) {
+                if (!avatarObj.geometry.boundingSphere) {
+                    avatarObj.geometry.computeBoundingSphere();
+                }
+                return this._cullFrustum.intersectsObject(avatarObj);
+            }
+            const box = new THREE.Box3().setFromObject(avatarObj);
+            if (box.isEmpty()) return false;
+            return this._cullFrustum.intersectsBox(box);
+        };
 
         this.users.forEach((user, userId) => {
             if (!user.avatar) return;
@@ -1071,7 +1083,7 @@ export class Theatre {
 
             const distance = playerPosition.distanceTo(user.avatar.position);
             const inRange = distance <= this._avatarCullDistance;
-            const inFrustum = this._cullFrustum.intersectsObject(user.avatar);
+            const inFrustum = intersectsAvatarSafe(user.avatar);
             const isVisible = inRange && inFrustum;
 
             user.avatar.visible = isVisible;
