@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { AvatarManager } from './AvatarManager.js';
 import { RoguelikeWorld } from './RoguelikeWorld.js';
+import { setOMIPhysicsProfile } from './OMIPhysics.js';
 
 export class Theatre {
     constructor(scene) {
@@ -38,6 +39,27 @@ export class Theatre {
         this.createLighting();
         this.setupTheatreAudio();
     }
+
+    applyStaticOMICollider(object3D, collider = {}) {
+        setOMIPhysicsProfile(object3D, {
+            collider: {
+                type: collider.type || 'box',
+                size: collider.size || null,
+                radius: collider.radius,
+                height: collider.height,
+                translation: collider.translation || [0, 0, 0],
+                scale: collider.scale || [1, 1, 1],
+                enabled: collider.enabled !== false,
+                layers: ['world', 'player']
+            },
+            physics: {
+                bodyType: 'static',
+                friction: collider.friction ?? 0.9,
+                restitution: collider.restitution ?? 0.02,
+                mass: 0
+            }
+        });
+    }
     
     createTheatreGeometry() {
         // Create massive main floor - 3x larger
@@ -51,6 +73,7 @@ export class Theatre {
         mainFloor.position.z = 30;
         mainFloor.receiveShadow = true;
         this.scene.add(mainFloor);
+        this.applyStaticOMICollider(mainFloor, { type: 'box', size: [90, 0.8, 60] });
         
         // Create massive recessed seating floor (lower level)
         const seatingFloorGeometry = new THREE.PlaneGeometry(84, 54);
@@ -63,6 +86,7 @@ export class Theatre {
         seatingFloor.position.set(0, -1.5, -15);
         seatingFloor.receiveShadow = true;
         this.scene.add(seatingFloor);
+        this.applyStaticOMICollider(seatingFloor, { type: 'box', size: [84, 0.8, 54] });
         
         // Create grand steps between levels
         for (let i = 0; i < 8; i++) {
@@ -73,6 +97,7 @@ export class Theatre {
             step.receiveShadow = true;
             step.castShadow = true;
             this.scene.add(step);
+            this.applyStaticOMICollider(step, { type: 'box', size: [84, 0.45, 3] });
         }
         
         // Create walls
@@ -89,6 +114,7 @@ export class Theatre {
         this.stage.castShadow = true;
         this.stage.receiveShadow = true;
         this.scene.add(this.stage);
+        this.applyStaticOMICollider(this.stage, { type: 'box', size: [90, 3.6, 18] });
     }
     
     createWalls() {
@@ -104,6 +130,7 @@ export class Theatre {
         backWall.receiveShadow = true;
         this.scene.add(backWall);
         this.walls.push(backWall);
+        this.applyStaticOMICollider(backWall, { type: 'box', size: [96, 60, 6] });
         
         // Left wall - towering megalithic stones
         const leftWallGeometry = new THREE.BoxGeometry(6, 60, 132);
@@ -112,6 +139,7 @@ export class Theatre {
         leftWall.receiveShadow = true;
         this.scene.add(leftWall);
         this.walls.push(leftWall);
+        this.applyStaticOMICollider(leftWall, { type: 'box', size: [6, 60, 132] });
         
         // Right wall - towering megalithic stones
         const rightWallGeometry = new THREE.BoxGeometry(6, 60, 132);
@@ -120,6 +148,7 @@ export class Theatre {
         rightWall.receiveShadow = true;
         this.scene.add(rightWall);
         this.walls.push(rightWall);
+        this.applyStaticOMICollider(rightWall, { type: 'box', size: [6, 60, 132] });
         
         // Front wall with exit door
         this.createFrontWallWithExit(stoneMaterial);
@@ -136,6 +165,7 @@ export class Theatre {
         frontLeft.receiveShadow = true;
         this.scene.add(frontLeft);
         this.walls.push(frontLeft);
+        this.applyStaticOMICollider(frontLeft, { type: 'box', size: [30, 60, 6] });
         
         // Right part of massive front wall
         const frontRightGeometry = new THREE.BoxGeometry(30, 60, 6);
@@ -144,6 +174,7 @@ export class Theatre {
         frontRight.receiveShadow = true;
         this.scene.add(frontRight);
         this.walls.push(frontRight);
+        this.applyStaticOMICollider(frontRight, { type: 'box', size: [30, 60, 6] });
         
         // Top part above exit - grand archway
         const frontTopGeometry = new THREE.BoxGeometry(36, 24, 6);
@@ -152,6 +183,7 @@ export class Theatre {
         frontTop.receiveShadow = true;
         this.scene.add(frontTop);
         this.walls.push(frontTop);
+        this.applyStaticOMICollider(frontTop, { type: 'box', size: [36, 24, 6] });
         
         // Massive exit door frame - ominous dark opening
         const doorFrameGeometry = new THREE.BoxGeometry(25.5, 37.5, 1.5);
@@ -332,6 +364,7 @@ export class Theatre {
                     occupied: false,
                     userId: null
                 };
+                this.applyStaticOMICollider(seatGroup, { type: 'box', size: [1.7, 2.2, 1.4] });
                 
                 this.seats.push(seatInfo);
                 this.scene.add(seatGroup);

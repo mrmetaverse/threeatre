@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { setOMIPhysicsProfile } from './OMIPhysics.js';
 
 export class RoguelikeWorld {
     constructor(scene, theatre) {
@@ -50,6 +51,28 @@ export class RoguelikeWorld {
         this.walls = [];
         this.floors = [];
         this.maze = [[0]];
+    }
+
+    applyStaticOMICollider(object3D, collider = {}) {
+        if (!object3D || object3D.userData?.noCollision) return;
+        setOMIPhysicsProfile(object3D, {
+            collider: {
+                type: collider.type || 'box',
+                size: collider.size || null,
+                radius: collider.radius,
+                height: collider.height,
+                translation: collider.translation || [0, 0, 0],
+                scale: collider.scale || [1, 1, 1],
+                enabled: collider.enabled !== false,
+                layers: ['world', 'player']
+            },
+            physics: {
+                bodyType: 'static',
+                friction: collider.friction ?? 0.85,
+                restitution: collider.restitution ?? 0.04,
+                mass: 0
+            }
+        });
     }
 
     buildWorld() {
@@ -117,6 +140,7 @@ export class RoguelikeWorld {
         tile.position.set(tileX * this.groundTileSize, -0.05, tileZ * this.groundTileSize);
         tile.receiveShadow = true;
         tile.userData.isGroundTile = true;
+        this.applyStaticOMICollider(tile, { type: 'box', size: [this.groundTileSize, 0.8, this.groundTileSize] });
         this.scene.add(tile);
         this.worldObjects.push(tile);
         return tile;
@@ -551,11 +575,13 @@ export class RoguelikeWorld {
 
         this.scene.add(group);
         this.worldObjects.push(group);
+        this.applyStaticOMICollider(group, { type: 'cylinder', radius: isGrand ? 24 : 14, height: isGrand ? 28 : 14, translation: [0, 10, 0] });
 
         const chestPos = pos.clone();
         chestPos.y = stepsCount * (isGrand ? 0.95 : 0.6) + (isGrand ? 2.6 : 1.5);
         const chest = this.createTreasureChest(chestPos);
         this.scene.add(chest);
+        this.applyStaticOMICollider(chest, { type: 'box', size: [2.4, 1.8, 2.0] });
         this.treasureChests.push({ mesh: chest, position: chestPos, opened: false });
 
         const templeData = {

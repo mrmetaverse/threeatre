@@ -9,6 +9,7 @@ import { LicenseManager } from './LicenseManager.js';
 import { RoomCodeManager } from './RoomCodeManager.js';
 import { WearableManager } from './WearableManager.js';
 import { StreamManager } from './StreamManager.js';
+import { computeOMIColliderAABB, getOMIColliderExtension } from './OMIPhysics.js';
 
 class TheatreApp {
     constructor() {
@@ -1260,13 +1261,13 @@ class TheatreApp {
         }
 
         const candidates = [];
-        this.scene.traverse((obj) => {
-            if (!obj?.isMesh) return;
-            if (obj.name === 'theatre-screen' || obj.name === 'exit-portal') return;
-            if (obj.userData?.userId || obj.userData?.isPlayer) return;
-            if (obj.name && obj.name.includes('avatar')) return;
+        for (const obj of this.scene.children) {
+            if (!obj) continue;
+            if (obj.name === 'theatre-screen' || obj.name === 'exit-portal') continue;
+            if (obj.userData?.userId || obj.userData?.isPlayer) continue;
+            if (obj.name && obj.name.includes('avatar')) continue;
             candidates.push(obj);
-        });
+        }
         return candidates;
     }
 
@@ -1284,6 +1285,18 @@ class TheatreApp {
         return true;
     }
 
+    getOMIColliderObjects(candidate) {
+        const colliderObjects = [];
+        if (!candidate?.traverse) return colliderObjects;
+        candidate.traverse((child) => {
+            const colliderExt = getOMIColliderExtension(child);
+            if (!colliderExt) return;
+            if (child.visible === false) return;
+            colliderObjects.push({ object: child, colliderExt });
+        });
+        return colliderObjects;
+    }
+
     refreshCollisionCache(force = false) {
         const now = performance.now();
         const mode = this.theatre?.roguelikeWorld?.isActive ? 'outside' : 'theatre';
@@ -1299,15 +1312,22 @@ class TheatreApp {
         for (const candidate of candidates) {
             if (!candidate) continue;
             if (candidate.isGroup || candidate.isObject3D) {
+                const omiColliderObjects = this.getOMIColliderObjects(candidate);
+                for (const { object, colliderExt } of omiColliderObjects) {
+                    const box = computeOMIColliderAABB(object, colliderExt);
+                    if (!box || box.isEmpty()) continue;
+                    colliders.push({ mesh: object, box, source: 'omi' });
+                }
                 candidate.traverse((child) => {
                     if (!child?.isMesh) return;
+                    if (getOMIColliderExtension(child)) return;
                     if (!this.isMeshCollidable(child)) return;
                     const box = new THREE.Box3().setFromObject(child);
                     if (box.isEmpty()) return;
                     const size = new THREE.Vector3();
                     box.getSize(size);
                     if (Math.max(size.x, size.z) < 0.45 && size.y < 0.45) return;
-                    colliders.push({ mesh: child, box });
+                    colliders.push({ mesh: child, box, source: 'mesh' });
                 });
                 continue;
             }
