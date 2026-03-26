@@ -38,8 +38,8 @@ export class RoguelikeWorld {
         this.savedBg = this.scene.background?.clone();
         this.savedFog = this.scene.fog;
 
-        this.scene.background = new THREE.Color(0x0b1020);
-        this.scene.fog = new THREE.FogExp2(0x0f1a2d, 0.0038);
+        this.scene.background = new THREE.Color(0x14203a);
+        this.scene.fog = new THREE.FogExp2(0x1a2a48, 0.0022);
 
         this.buildGround();
         this.buildAtmosphere();
@@ -129,10 +129,10 @@ export class RoguelikeWorld {
 
     buildTemples() {
         const templeConfigs = [
-            { pos: new THREE.Vector3(-40, 0, 140), color: 0xff6600, name: 'Ember Shrine', beaconColor: 0xff4400, dist: 'near' },
-            { pos: new THREE.Vector3(55, 0, 170), color: 0x44aaff, name: 'Frost Sanctum', beaconColor: 0x2288ff, dist: 'mid' },
-            { pos: new THREE.Vector3(-20, 0, 230), color: 0xaa44ff, name: 'Void Temple', beaconColor: 0x8822ff, dist: 'far' },
-            { pos: new THREE.Vector3(70, 0, 280), color: 0xffdd00, name: 'Golden Ziggurat', beaconColor: 0xffaa00, dist: 'far' },
+            { pos: new THREE.Vector3(0, 0, 118), color: 0xff6600, name: 'Ember Shrine', beaconColor: 0xff4400, dist: 'near' },
+            { pos: new THREE.Vector3(-45, 0, 150), color: 0x44aaff, name: 'Frost Sanctum', beaconColor: 0x2288ff, dist: 'mid' },
+            { pos: new THREE.Vector3(55, 0, 170), color: 0xaa44ff, name: 'Void Temple', beaconColor: 0x8822ff, dist: 'far' },
+            { pos: new THREE.Vector3(-20, 0, 220), color: 0xffdd00, name: 'Golden Ziggurat', beaconColor: 0xffaa00, dist: 'far' },
         ];
 
         templeConfigs.forEach(cfg => {
@@ -272,7 +272,7 @@ export class RoguelikeWorld {
     }
 
     setupWorldLighting() {
-        const moonLight = new THREE.DirectionalLight(0x7aa0ff, 0.95);
+        const moonLight = new THREE.DirectionalLight(0x9ec2ff, 1.35);
         moonLight.position.set(50, 80, 200);
         moonLight.castShadow = true;
         moonLight.shadow.mapSize.width = 2048;
@@ -286,13 +286,32 @@ export class RoguelikeWorld {
         this.scene.add(moonLight);
         this.worldLights.push(moonLight);
 
-        const ambient = new THREE.AmbientLight(0x1d2848, 0.55);
+        const ambient = new THREE.AmbientLight(0x2b3f69, 0.9);
         this.scene.add(ambient);
         this.worldLights.push(ambient);
 
-        const hemiLight = new THREE.HemisphereLight(0x6f7fb8, 0x18200f, 0.45);
+        const hemiLight = new THREE.HemisphereLight(0x8ea2dd, 0x27381b, 0.8);
         this.scene.add(hemiLight);
         this.worldLights.push(hemiLight);
+
+        // Strong guide light so the outdoor objective is always visible.
+        const guideLight = new THREE.PointLight(0xffaa44, 7, 280);
+        guideLight.position.set(0, 14, 118);
+        this.scene.add(guideLight);
+        this.worldLights.push(guideLight);
+
+        const guideBeam = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.6, 2.5, 60, 12, 1, true),
+            new THREE.MeshBasicMaterial({
+                color: 0xffaa44,
+                transparent: true,
+                opacity: 0.12,
+                side: THREE.DoubleSide
+            })
+        );
+        guideBeam.position.set(0, 30, 118);
+        this.scene.add(guideBeam);
+        this.worldObjects.push(guideBeam);
 
         const moonGeo = new THREE.SphereGeometry(8, 32, 32);
         const moonMat = new THREE.MeshBasicMaterial({ color: 0xddeeff });
@@ -312,8 +331,9 @@ export class RoguelikeWorld {
     spawnGhosts() {
         for (let i = 0; i < 12; i++) {
             const ghost = this.createGhost();
-            const x = (Math.random() - 0.5) * 250;
-            const z = 100 + Math.random() * 200;
+            const nearSpawn = i < 5;
+            const x = nearSpawn ? (Math.random() - 0.5) * 60 : (Math.random() - 0.5) * 250;
+            const z = nearSpawn ? 100 + Math.random() * 50 : 120 + Math.random() * 200;
             ghost.position.set(x, 2, z);
             this.scene.add(ghost);
             this.ghosts.push({
@@ -322,7 +342,7 @@ export class RoguelikeWorld {
                 target: null,
                 speed: 0.015 + Math.random() * 0.02,
                 lastPlayerDistance: Infinity,
-                aggroRange: 20 + Math.random() * 15,
+                aggroRange: 45 + Math.random() * 30,
                 killRange: 1.8,
                 health: 2 + Math.floor(Math.random() * 3)
             });
@@ -685,6 +705,12 @@ export class RoguelikeWorld {
         this.buildWorld();
         this.enterTimestamp = Date.now();
         if (this.theatre.camera) this.theatre.camera.position.set(0, 1.6, 88);
+        // Force player to face toward temples immediately on world entry.
+        if (this.theatre.app) {
+            this.theatre.app.yaw = Math.PI;
+            this.theatre.app.pitch = 0;
+            this.theatre.app.applyCameraRotation();
+        }
         if (this.theatre.networkManager && this.theatre.camera) {
             this.theatre.networkManager.updatePosition(this.theatre.camera.position);
         }
