@@ -69,6 +69,7 @@ class TheatreApp {
             look: { x: 0, y: 0 }
         };
         this.mobileJoystickElements = null;
+        this.playerCollisionRadius = 0.45;
         
         this.init();
         this.setupEventListeners();
@@ -1201,6 +1202,7 @@ class TheatreApp {
             }
         }
         
+        newPosition = this.resolveTheatreWallCollisions(this.camera.position, newPosition);
         this.camera.position.copy(newPosition);
         
         if (this.networkManager && (moveVector.length() > 0 || !this.isOnGround)) {
@@ -1220,6 +1222,50 @@ class TheatreApp {
         }
         // Main floor
         return 0;
+    }
+
+    resolveTheatreWallCollisions(currentPosition, proposedPosition) {
+        if (!this.theatre || this.theatre.roguelikeWorld?.isActive) {
+            return proposedPosition;
+        }
+        if (!this.theatre.walls || this.theatre.walls.length === 0) {
+            return proposedPosition;
+        }
+
+        const radius = this.playerCollisionRadius;
+        const y = proposedPosition.y;
+
+        const isBlocked = (pos) => {
+            for (const wall of this.theatre.walls) {
+                const box = new THREE.Box3().setFromObject(wall);
+                if (pos.y < box.min.y - 0.2 || pos.y > box.max.y + 0.2) continue;
+
+                const minX = box.min.x - radius;
+                const maxX = box.max.x + radius;
+                const minZ = box.min.z - radius;
+                const maxZ = box.max.z + radius;
+
+                if (pos.x >= minX && pos.x <= maxX && pos.z >= minZ && pos.z <= maxZ) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        const resolved = currentPosition.clone();
+        resolved.y = y;
+
+        const xStep = new THREE.Vector3(proposedPosition.x, y, currentPosition.z);
+        if (!isBlocked(xStep)) {
+            resolved.x = proposedPosition.x;
+        }
+
+        const zStep = new THREE.Vector3(resolved.x, y, proposedPosition.z);
+        if (!isBlocked(zStep)) {
+            resolved.z = proposedPosition.z;
+        }
+
+        return resolved;
     }
     
     animate() {
