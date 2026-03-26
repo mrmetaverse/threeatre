@@ -900,7 +900,16 @@ export class RoguelikeWorld {
         const dx = playerPosition.x - portalPos.x;
         const dz = playerPosition.z - portalPos.z;
         const xzDist = Math.sqrt(dx * dx + dz * dz);
-        return xzDist < 6 && playerPosition.z > 55;
+        // Primary portal trigger (legacy precise check)
+        if (xzDist < 6 && playerPosition.z > 55) return true;
+
+        // Failsafe trigger: any player walking through the central doorway
+        // should enter outside mode even if they miss the exact portal center.
+        const inDoorwayX = Math.abs(playerPosition.x) < 16;
+        const pastThresholdZ = playerPosition.z > 58;
+        if (inDoorwayX && pastThresholdZ) return true;
+
+        return false;
     }
 
     checkReturnCollision(playerPosition) {
