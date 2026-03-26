@@ -900,6 +900,12 @@ export class Theatre {
         // Check if player wants to return to theatre
         if (this.roguelikeWorld.isActive && this.roguelikeWorld.checkReturnCollision(playerPosition)) {
             this.roguelikeWorld.hideWorld();
+            if (this.camera) {
+                this.camera.position.set(0, 2, 18);
+            }
+            if (this.networkManager && this.camera) {
+                this.networkManager.updatePosition(this.camera.position);
+            }
         }
     }
     

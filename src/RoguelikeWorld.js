@@ -23,6 +23,8 @@ export class RoguelikeWorld {
         this.savedBg = null;
         this.worldLights = [];
         this.exitPosition = new THREE.Vector3(0, 1.6, 70);
+        this.enterTimestamp = 0;
+        this.returnCooldownMs = 2500;
 
         this.walls = [];
         this.floors = [];
@@ -36,8 +38,8 @@ export class RoguelikeWorld {
         this.savedBg = this.scene.background?.clone();
         this.savedFog = this.scene.fog;
 
-        this.scene.background = new THREE.Color(0x050510);
-        this.scene.fog = new THREE.FogExp2(0x0a0a1a, 0.008);
+        this.scene.background = new THREE.Color(0x0b1020);
+        this.scene.fog = new THREE.FogExp2(0x0f1a2d, 0.0038);
 
         this.buildGround();
         this.buildAtmosphere();
@@ -270,7 +272,7 @@ export class RoguelikeWorld {
     }
 
     setupWorldLighting() {
-        const moonLight = new THREE.DirectionalLight(0x334466, 0.4);
+        const moonLight = new THREE.DirectionalLight(0x7aa0ff, 0.95);
         moonLight.position.set(50, 80, 200);
         moonLight.castShadow = true;
         moonLight.shadow.mapSize.width = 2048;
@@ -284,11 +286,11 @@ export class RoguelikeWorld {
         this.scene.add(moonLight);
         this.worldLights.push(moonLight);
 
-        const ambient = new THREE.AmbientLight(0x111122, 0.3);
+        const ambient = new THREE.AmbientLight(0x1d2848, 0.55);
         this.scene.add(ambient);
         this.worldLights.push(ambient);
 
-        const hemiLight = new THREE.HemisphereLight(0x111133, 0x0a0a05, 0.3);
+        const hemiLight = new THREE.HemisphereLight(0x6f7fb8, 0x18200f, 0.45);
         this.scene.add(hemiLight);
         this.worldLights.push(hemiLight);
 
@@ -681,7 +683,11 @@ export class RoguelikeWorld {
     enterWorld(playerPosition) {
         this.hideTheatre();
         this.buildWorld();
-        if (this.theatre.camera) this.theatre.camera.position.set(0, 1.6, 75);
+        this.enterTimestamp = Date.now();
+        if (this.theatre.camera) this.theatre.camera.position.set(0, 1.6, 88);
+        if (this.theatre.networkManager && this.theatre.camera) {
+            this.theatre.networkManager.updatePosition(this.theatre.camera.position);
+        }
         this.showWorldWarning();
     }
 
@@ -750,9 +756,10 @@ export class RoguelikeWorld {
 
     checkReturnCollision(playerPosition) {
         if (!this.isActive) return false;
+        if (Date.now() - this.enterTimestamp < this.returnCooldownMs) return false;
         const dx = playerPosition.x - this.exitPosition.x;
         const dz = playerPosition.z - this.exitPosition.z;
-        return Math.sqrt(dx * dx + dz * dz) < 5;
+        return Math.sqrt(dx * dx + dz * dz) < 3.5;
     }
 
     getRandomFloorPosition() { return new THREE.Vector3((Math.random() - 0.5) * 200, 0, 90 + Math.random() * 200); }

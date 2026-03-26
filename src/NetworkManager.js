@@ -13,6 +13,7 @@ export class NetworkManager {
         this.lastPositionUpdate = 0;
         this.positionUpdateThrottle = 100;
         this.serverUrl = null;
+        this.heartbeatInterval = null;
         
         this.detectSessionMode();
         this.init();
@@ -30,7 +31,8 @@ export class NetworkManager {
             reconnection: true,
             reconnectionAttempts: Infinity,
             reconnectionDelay: 1000,
-            reconnectionDelayMax: 5000
+            reconnectionDelayMax: 10000,
+            randomizationFactor: 0.3
         });
         
         this.setupEventListeners();
@@ -57,6 +59,7 @@ export class NetworkManager {
             console.log('Connected to server:', this.serverUrl);
             this.isConnected = true;
             this.joinRoom();
+            this.startHeartbeat();
             this.updateConnectionStatus('Connected');
             
             const offlineMsg = document.querySelector('[data-offline-message]');
@@ -66,6 +69,7 @@ export class NetworkManager {
         this.socket.on('disconnect', () => {
             console.log('Disconnected from server');
             this.isConnected = false;
+            this.stopHeartbeat();
             this.updateConnectionStatus('Disconnected');
         });
         
@@ -78,6 +82,7 @@ export class NetworkManager {
             console.log('Reconnected to server');
             this.isConnected = true;
             this.joinRoom();
+            this.startHeartbeat();
             this.updateConnectionStatus('Connected');
         });
 
@@ -167,6 +172,25 @@ export class NetworkManager {
         this.socket.on('avatar-changed', (data) => {
             console.log('User avatar changed:', data.userId);
         });
+    }
+
+    startHeartbeat() {
+        this.stopHeartbeat();
+        this.heartbeatInterval = setInterval(() => {
+            if (!this.socket || !this.isConnected) return;
+            this.socket.emit('client-heartbeat', {
+                roomId: this.roomId,
+                userId: this.userId,
+                ts: Date.now()
+            });
+        }, 10000);
+    }
+
+    stopHeartbeat() {
+        if (this.heartbeatInterval) {
+            clearInterval(this.heartbeatInterval);
+            this.heartbeatInterval = null;
+        }
     }
     
     joinRoom() {
@@ -436,6 +460,7 @@ export class NetworkManager {
     }
     
     disconnect() {
+        this.stopHeartbeat();
         if (this.socket) {
             this.socket.disconnect();
             this.isConnected = false;

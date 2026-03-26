@@ -40,6 +40,20 @@ app.get('/health', (req, res) => {
 
 // Store room data
 const rooms = new Map();
+const pendingDisconnects = new Map();
+
+function getDisconnectKey(roomId, userId) {
+    return `${roomId}:${userId}`;
+}
+
+function clearPendingDisconnect(roomId, userId) {
+    const key = getDisconnectKey(roomId, userId);
+    const timer = pendingDisconnects.get(key);
+    if (timer) {
+        clearTimeout(timer);
+        pendingDisconnects.delete(key);
+    }
+}
 
 // Room class to manage room state
 class Room {
@@ -158,11 +172,21 @@ io.on('connection', (socket) => {
         socket.join(roomId);
         socket.currentRoom = roomId;
         socket.userId = userData.id;
+        clearPendingDisconnect(roomId, userData.id);
         
-        // Add user to room
-        room.addUser(userData.id, userData);
-        const user = room.users.get(userData.id);
-        user.socketId = socket.id;
+        // Add or restore user in room
+        const existingUser = room.users.get(userData.id);
+        const isReconnection = !!existingUser;
+        if (isReconnection) {
+            existingUser.socketId = socket.id;
+            existingUser.name = userData.name || existingUser.name;
+            existingUser.color = userData.color || existingUser.color;
+            existingUser.position = userData.position || existingUser.position;
+        } else {
+            room.addUser(userData.id, userData);
+            const user = room.users.get(userData.id);
+            user.socketId = socket.id;
+        }
         
         // Send room data to user
         socket.emit('room-joined', {
@@ -171,10 +195,14 @@ io.on('connection', (socket) => {
         });
         
         // Notify other users
-        socket.to(roomId).emit('user-joined', userData);
-        socket.to(roomId).emit('user-count-update', room.users.size);
-        
-        console.log(`User ${userData.id} joined room ${roomId}`);
+        if (!isReconnection) {
+            socket.to(roomId).emit('user-joined', userData);
+            socket.to(roomId).emit('user-count-update', room.users.size);
+            console.log(`User ${userData.id} joined room ${roomId}`);
+        } else {
+            socket.to(roomId).emit('user-count-update', room.users.size);
+            console.log(`User ${userData.id} reconnected to room ${roomId}`);
+        }
     });
     
     socket.on('position-update', (data) => {
@@ -444,34 +472,54 @@ io.on('connection', (socket) => {
             }
         }
     });
+
+    socket.on('client-heartbeat', () => {
+        // Application-level keepalive to reduce idle disconnect churn.
+    });
     
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.id);
         
         if (socket.currentRoom && socket.userId) {
-            const room = rooms.get(socket.currentRoom);
-            if (room) {
-                const wasStreamHost = room.streamHost === socket.userId;
-                room.removeUser(socket.userId);
-                
-                socket.to(socket.currentRoom).emit('user-left', socket.userId);
-                socket.to(socket.currentRoom).emit('user-count-update', room.users.size);
-                
-                if (room.host !== socket.userId && room.host) {
-                    socket.to(socket.currentRoom).emit('host-changed', room.host);
+            const roomId = socket.currentRoom;
+            const userId = socket.userId;
+            const key = getDisconnectKey(roomId, userId);
+
+            clearPendingDisconnect(roomId, userId);
+            const timer = setTimeout(() => {
+                pendingDisconnects.delete(key);
+
+                const room = rooms.get(roomId);
+                if (!room) return;
+                const currentUser = room.users.get(userId);
+                if (!currentUser) return;
+
+                // User reconnected and replaced socket before timeout.
+                if (currentUser.socketId && currentUser.socketId !== socket.id) return;
+
+                const wasStreamHost = room.streamHost === userId;
+                room.removeUser(userId);
+
+                io.to(roomId).emit('user-left', userId);
+                io.to(roomId).emit('user-count-update', room.users.size);
+
+                if (room.host && room.host !== userId) {
+                    io.to(roomId).emit('host-changed', room.host);
                 }
 
                 if (wasStreamHost) {
                     room.screenSharing = false;
                     room.streamHost = null;
-                    socket.to(socket.currentRoom).emit('stream-stopped');
+                    io.to(roomId).emit('stream-stopped');
                 }
-                
+
                 if (room.users.size === 0) {
-                    rooms.delete(socket.currentRoom);
-                    console.log(`Room ${socket.currentRoom} deleted (empty)`);
+                    rooms.delete(roomId);
+                    console.log(`Room ${roomId} deleted (empty)`);
                 }
-            }
+            }, 25000);
+
+            pendingDisconnects.set(key, timer);
         }
     });
 });
