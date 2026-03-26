@@ -276,15 +276,6 @@ export class RoguelikeWorld {
         theatreLandmark.name = 'outside-theatre-landmark';
         theatreLandmark.userData.noCollision = true;
 
-        const portalRing = new THREE.Mesh(
-            new THREE.TorusGeometry(4.2, 0.5, 16, 36),
-            new THREE.MeshBasicMaterial({ color: 0x00ffcc, transparent: true, opacity: 0.6 })
-        );
-        portalRing.position.set(0, 3.4, -6);
-        portalRing.rotation.x = Math.PI / 2;
-        portalRing.userData.noCollision = true;
-        theatreLandmark.add(portalRing);
-
         const returnBeacon = new THREE.Mesh(
             new THREE.CylinderGeometry(0.9, 2.2, 50, 10, 1, true),
             new THREE.MeshBasicMaterial({

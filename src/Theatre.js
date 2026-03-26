@@ -28,6 +28,7 @@ export class Theatre {
         this._avatarCullDistance = 140;
         this._lastCullUpdateMs = 0;
         this._cullUpdateIntervalMs = 150;
+        this._lastTransitionCheckPosition = null;
         this.theatreSpeakerAnchors = [];
         this.theatreSpeakerAudioNodes = [];
         this._theatreSpeakerAudioUnlocked = false;
@@ -1092,15 +1093,33 @@ export class Theatre {
     }
     
     checkWorldTransitions(playerPosition) {
-        // Crossing the doorway outward enables outside mode in the same continuous world.
-        if (!this.roguelikeWorld.isActive && this.roguelikeWorld.checkExitCollision(playerPosition)) {
+        if (!this.exitPortal || !playerPosition) return;
+        const portalPos = this.exitPortal.position;
+        const lastPos = this._lastTransitionCheckPosition || playerPosition.clone();
+
+        const doorwayHalfWidth = 12.5;
+        const doorwayMaxHeight = 24;
+        const nearDoorwayNow = Math.abs(playerPosition.x - portalPos.x) <= doorwayHalfWidth && playerPosition.y <= doorwayMaxHeight;
+        const nearDoorwayLast = Math.abs(lastPos.x - portalPos.x) <= doorwayHalfWidth && lastPos.y <= doorwayMaxHeight;
+        const nearDoorway = nearDoorwayNow || nearDoorwayLast;
+
+        const crossedOutward =
+            nearDoorway
+            && lastPos.z <= (portalPos.z + 0.8)
+            && playerPosition.z > (portalPos.z + 2.2);
+
+        const crossedInward =
+            nearDoorway
+            && lastPos.z >= (portalPos.z - 0.8)
+            && playerPosition.z < (portalPos.z - 1.2);
+
+        if (!this.roguelikeWorld.isActive && crossedOutward) {
             this.roguelikeWorld.enterWorld(playerPosition);
-        }
-        
-        // Crossing back through the same doorway disables outside danger mode.
-        if (this.roguelikeWorld.isActive && this.roguelikeWorld.checkInteriorCollision(playerPosition)) {
+        } else if (this.roguelikeWorld.isActive && crossedInward) {
             this.roguelikeWorld.hideWorld();
         }
+
+        this._lastTransitionCheckPosition = playerPosition.clone();
     }
     
     dispose() {
