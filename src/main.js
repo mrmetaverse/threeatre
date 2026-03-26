@@ -1241,6 +1241,10 @@ class TheatreApp {
     }
     
     getGroundHeight(position) {
+        if (this.theatre?.roguelikeWorld?.isActive) {
+            const currentFootY = this.camera.position.y - 1.6;
+            return this.theatre.roguelikeWorld.getGroundHeightAt(position, currentFootY);
+        }
         // Enhanced ground height detection for the theatre
         // In recessed seating area
         if (position.z < 3 && position.z > -45) {

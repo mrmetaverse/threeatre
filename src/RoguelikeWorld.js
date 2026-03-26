@@ -27,7 +27,7 @@ export class RoguelikeWorld {
         this.exitPosition = new THREE.Vector3(0, 1.6, 70);
         this.enterTimestamp = 0;
         this.returnCooldownMs = 2500;
-        this.ghostGracePeriodMs = 7000;
+        this.ghostGracePeriodMs = 14000;
         this.templeSafeRadius = 18;
         this.theatreSafeRadius = 22;
         this.lastSafeZoneMessageAt = 0;
@@ -45,9 +45,11 @@ export class RoguelikeWorld {
         this._outsideCullFrustum = new THREE.Frustum();
         this._outsideCullProjScreen = new THREE.Matrix4();
         this._lastOutsideCullMs = 0;
-        this._outsideCullIntervalMs = 150;
+        this._outsideCullIntervalMs = 220;
         this.spookyAudioEmitters = [];
         this._spookyAudioReady = false;
+        this.walkableSurfaces = [];
+        this.worldInitialized = false;
 
         this.walls = [];
         this.floors = [];
@@ -76,8 +78,47 @@ export class RoguelikeWorld {
         });
     }
 
+    registerWalkableDisc(center, radius, y, stepHeight = 1.25) {
+        this.walkableSurfaces.push({
+            type: 'disc',
+            center: center.clone(),
+            radius: Math.max(0.1, Number(radius) || 1),
+            y: Number(y) || 0,
+            stepHeight: Math.max(0.2, Number(stepHeight) || 1.25)
+        });
+    }
+
+    getGroundHeightAt(position, currentFootY = -0.05) {
+        let targetHeight = -0.05;
+        for (const surface of this.walkableSurfaces) {
+            if (surface.type !== 'disc') continue;
+            const dx = position.x - surface.center.x;
+            const dz = position.z - surface.center.z;
+            if ((dx * dx + dz * dz) > (surface.radius * surface.radius)) continue;
+
+            // Step-up / step-down tolerance so stairs feel natural.
+            if (surface.y <= currentFootY + surface.stepHeight && surface.y >= currentFootY - 0.9) {
+                if (surface.y > targetHeight) {
+                    targetHeight = surface.y;
+                }
+            }
+        }
+        return targetHeight;
+    }
+
     buildWorld() {
         if (this.isActive) return;
+        if (this.worldInitialized) {
+            this.isActive = true;
+            this.scene.background = new THREE.Color(0x101a2e);
+            this.scene.fog = new THREE.FogExp2(0x1b2742, 0.0018);
+            this.worldLights.forEach((light) => {
+                if (light && !light.parent) this.scene.add(light);
+            });
+            this.showWorldDebugOverlay();
+            this.showOutsideStateOverlay();
+            return;
+        }
         this.clearWorld();
 
         this.savedBg = this.scene.background?.clone();
@@ -94,9 +135,9 @@ export class RoguelikeWorld {
         this.scatterSpookyDecor();
         this.spawnGhosts();
         this.setupWorldLighting();
-        this.setupSpookySpatialAudio();
 
         this.isActive = true;
+        this.worldInitialized = true;
         console.log('[RoguelikeWorld] Active:', {
             worldObjects: this.worldObjects.length,
             temples: this.temples.length,
@@ -143,6 +184,7 @@ export class RoguelikeWorld {
         tile.userData.isGroundTile = true;
         this.scene.add(tile);
         this.worldObjects.push(tile);
+        this.registerWalkableDisc(tile.position, this.groundTileSize * 0.68, -0.05, 1.4);
         return tile;
     }
 
@@ -181,7 +223,7 @@ export class RoguelikeWorld {
     }
 
     buildAtmosphere() {
-        const particleCount = 220;
+        const particleCount = 140;
         const positions = new Float32Array(particleCount * 3);
         for (let i = 0; i < particleCount; i++) {
             positions[i * 3] = (Math.random() - 0.5) * 400;
@@ -203,7 +245,7 @@ export class RoguelikeWorld {
         this.worldObjects.push(fogParticles);
 
         const starsGeo = new THREE.BufferGeometry();
-        const starCount = 1300;
+        const starCount = 900;
         const starPositions = new Float32Array(starCount * 3);
         for (let i = 0; i < starCount; i++) {
             const angle = Math.random() * Math.PI * 2;
@@ -466,12 +508,21 @@ export class RoguelikeWorld {
         const isGrand = dist === 'grand';
 
         const islandGeo = new THREE.CylinderGeometry(isGrand ? 22 : 12, isGrand ? 30 : 16, isGrand ? 3 : 2, 28);
+        const islandHeight = isGrand ? 3 : 2;
         const islandMat = new THREE.MeshLambertMaterial({ color: 0x2a2a20 });
         const island = new THREE.Mesh(islandGeo, islandMat);
         island.position.y = isGrand ? -1.5 : -1;
         island.castShadow = true;
         island.receiveShadow = true;
         group.add(island);
+        this.applyStaticOMICollider(island, {
+            type: 'cylinder',
+            radius: isGrand ? 22 : 12,
+            height: islandHeight,
+            friction: 0.95
+        });
+        const islandTopY = pos.y + island.position.y + (islandHeight * 0.5);
+        this.registerWalkableDisc(pos, isGrand ? 22 : 12, islandTopY, 1.5);
 
         const stepsCount = isGrand ? 7 : 4;
         for (let i = 0; i < stepsCount; i++) {
@@ -483,6 +534,14 @@ export class RoguelikeWorld {
             step.position.y = i * h;
             step.castShadow = true;
             group.add(step);
+            this.applyStaticOMICollider(step, {
+                type: 'cylinder',
+                radius: r,
+                height: h,
+                friction: 1.0
+            });
+            const stepTopY = pos.y + step.position.y + (h * 0.5);
+            this.registerWalkableDisc(pos, Math.max(0.5, r - 0.35), stepTopY, 1.15);
         }
 
         const pillarCount = isGrand ? 14 : (dist === 'far' ? 8 : 6);
@@ -496,6 +555,7 @@ export class RoguelikeWorld {
             const stepHeight = isGrand ? 0.95 : 0.6;
             pillar.position.set(Math.cos(angle) * pillarRadius, pillarHeight / 2 + stepsCount * stepHeight - stepHeight, Math.sin(angle) * pillarRadius);
             pillar.castShadow = true;
+            pillar.userData.noCollision = true;
             group.add(pillar);
         }
 
@@ -505,11 +565,19 @@ export class RoguelikeWorld {
         altar.position.y = stepsCount * (isGrand ? 0.95 : 0.6) + (isGrand ? 1.4 : 0.75);
         altar.castShadow = true;
         group.add(altar);
+        this.applyStaticOMICollider(altar, {
+            type: 'box',
+            size: [isGrand ? 5.2 : 2.5, isGrand ? 2.8 : 1.5, isGrand ? 5.2 : 2.5],
+            friction: 1.0
+        });
+        const altarTopY = pos.y + altar.position.y + ((isGrand ? 2.8 : 1.5) * 0.5);
+        this.registerWalkableDisc(pos, isGrand ? 3.0 : 1.6, altarTopY, 1.0);
 
         const orbGeo = new THREE.SphereGeometry(isGrand ? 1.2 : 0.6, 16, 12);
         const orbMat = new THREE.MeshBasicMaterial({ color: color, transparent: true, opacity: 0.9 });
         const orb = new THREE.Mesh(orbGeo, orbMat);
         orb.position.y = stepsCount * (isGrand ? 0.95 : 0.6) + (isGrand ? 4.2 : 2.2);
+        orb.userData.noCollision = true;
         group.add(orb);
 
         const beaconLight = new THREE.PointLight(beaconColor, isGrand ? 6 : 3, isGrand ? 150 : 80);
@@ -526,6 +594,7 @@ export class RoguelikeWorld {
         const beamMat = new THREE.MeshBasicMaterial({ color: beaconColor, transparent: true, opacity: 0.08, side: THREE.DoubleSide });
         const beam = new THREE.Mesh(beamGeo, beamMat);
         beam.position.y = stepsCount * (isGrand ? 0.95 : 0.6) + (isGrand ? 30 : 17);
+        beam.userData.noCollision = true;
         group.add(beam);
 
         // Temple safe zone ring: entering this area protects player from ghost kills.
@@ -540,16 +609,11 @@ export class RoguelikeWorld {
         );
         safeRing.rotation.x = -Math.PI / 2;
         safeRing.position.y = 0.08;
+        safeRing.userData.noCollision = true;
         group.add(safeRing);
 
         this.scene.add(group);
         this.worldObjects.push(group);
-        // Allow players to enter temples freely; avoid one giant blocking hull.
-        group.traverse((child) => {
-            if (child.isMesh) {
-                child.userData.noCollision = true;
-            }
-        });
 
         const chestPos = pos.clone();
         chestPos.y = stepsCount * (isGrand ? 0.95 : 0.6) + (isGrand ? 2.6 : 1.5);
@@ -577,7 +641,7 @@ export class RoguelikeWorld {
     }
 
     scatterSpookyDecor() {
-        for (let i = 0; i < 60; i++) {
+        for (let i = 0; i < 36; i++) {
             const x = (Math.random() - 0.5) * 350;
             const z = 80 + Math.random() * 230;
             const height = 1 + Math.random() * 3;
@@ -614,7 +678,7 @@ export class RoguelikeWorld {
             }
         }
 
-        for (let i = 0; i < 8; i++) {
+        for (let i = 0; i < 6; i++) {
             const x = (Math.random() - 0.5) * 300;
             const z = 90 + Math.random() * 200;
             const skullGeo = new THREE.SphereGeometry(0.25, 8, 6);
@@ -1613,6 +1677,8 @@ export class RoguelikeWorld {
         this.treasureChests = []; this.temples = []; this.landmarks = [];
         this.worldLights = []; this.discoveredLandmarks.clear();
         this.templeCellMap.clear();
+        this.walkableSurfaces = [];
+        this.worldInitialized = false;
         this.groundTiles.clear();
         if (this.groundTexture) {
             this.groundTexture.dispose();
