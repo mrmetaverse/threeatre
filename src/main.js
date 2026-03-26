@@ -158,13 +158,16 @@ class TheatreApp {
     async initRenderer() {
         // Always use WebGL for now since WebGPU import path is not available in current Three.js version
         // WebGPU support can be added later when the proper import paths are available
-        this.renderer = new THREE.WebGLRenderer({ antialias: true });
+        this.renderer = new THREE.WebGLRenderer({
+            antialias: false,
+            powerPreference: 'high-performance'
+        });
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         console.log('Using WebGL renderer');
         
         this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.setPixelRatio(window.devicePixelRatio);
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
         this.renderer.outputColorSpace = THREE.SRGBColorSpace;
         
         // Add renderer to DOM

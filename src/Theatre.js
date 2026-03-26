@@ -18,6 +18,10 @@ export class Theatre {
         this.exitPortal = null;
         this.networkManager = null; // Will be set by main app
         this.app = null; // Reference to main app for bindle access
+        this._streamCanvas = null;
+        this._streamCtx = null;
+        this._streamFrameIntervalMs = 1000 / 20;
+        this._lastStreamFrameMs = 0;
         
         this.init();
     }
@@ -469,6 +473,8 @@ export class Theatre {
     
     setHostStream(stream, isLocalHost = false) {
         this.stopHostStream();
+        this._streamFrameIntervalMs = isLocalHost ? (1000 / 12) : (1000 / 20);
+        this._lastStreamFrameMs = 0;
 
         const video = document.createElement('video');
         this.hostVideo = video;
@@ -495,7 +501,8 @@ export class Theatre {
 
             if (this.videoTexture) this.videoTexture.dispose();
 
-            const texW = Math.min(w, 1280);
+            // Local host preview is intentionally lighter to avoid GPU spikes/crashes.
+            const texW = Math.min(w, isLocalHost ? 960 : 1280);
             const texH = Math.round(texW / ar);
 
             this._streamCanvas = document.createElement('canvas');
@@ -620,6 +627,7 @@ export class Theatre {
 
         this._streamCanvas = null;
         this._streamCtx = null;
+        this._lastStreamFrameMs = 0;
 
         if (this.hostVideo) {
             this.hostVideo.pause();
@@ -815,9 +823,13 @@ export class Theatre {
     
     update(deltaTime = 0.016) {
         if (this._streamCtx && this.hostVideo && this.hostVideo.readyState >= 2) {
-            this._streamCtx.drawImage(this.hostVideo, 0, 0,
-                this._streamCanvas.width, this._streamCanvas.height);
-            this.videoTexture.needsUpdate = true;
+            const now = performance.now();
+            if ((now - this._lastStreamFrameMs) >= this._streamFrameIntervalMs) {
+                this._streamCtx.drawImage(this.hostVideo, 0, 0,
+                    this._streamCanvas.width, this._streamCanvas.height);
+                this.videoTexture.needsUpdate = true;
+                this._lastStreamFrameMs = now;
+            }
         }
         
         // Update avatar manager
