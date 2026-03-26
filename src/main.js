@@ -772,10 +772,18 @@ class TheatreApp {
                 name: 'You',
                 color: this.generateUserColor()
             };
-            
-            const avatarInfo = await this.theatre.addUser('local-player', userData);
-            this.playerAvatar = avatarInfo.avatar;
+
+            const avatarInfo = this.theatre.avatarManager.createSimpleAvatar('local-player', userData);
+            this.playerAvatar = avatarInfo.scene;
             this.playerAvatar.visible = false;
+            this.theatre.users.set('local-player', {
+                id: 'local-player',
+                avatar: avatarInfo.scene,
+                position: avatarInfo.scene.position.clone(),
+                seatId: null,
+                data: userData,
+                avatarType: 'simple'
+            });
         } catch (error) {
             console.warn('Failed to create player avatar:', error);
         }

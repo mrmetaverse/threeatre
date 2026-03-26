@@ -85,8 +85,7 @@ export class Theatre {
     createWalls() {
         // Ancient stone wall material with texture-like appearance
         const stoneMaterial = new THREE.MeshLambertMaterial({ 
-            color: 0x4a3c2a,
-            roughness: 0.9
+            color: 0x4a3c2a
         });
         
         // Back wall - colossal stone blocks
