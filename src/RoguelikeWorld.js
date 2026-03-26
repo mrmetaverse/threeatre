@@ -705,12 +705,6 @@ export class RoguelikeWorld {
         this.buildWorld();
         this.enterTimestamp = Date.now();
         if (this.theatre.camera) this.theatre.camera.position.set(0, 1.6, 88);
-        // Force player to face toward temples immediately on world entry.
-        if (this.theatre.app) {
-            this.theatre.app.yaw = Math.PI;
-            this.theatre.app.pitch = 0;
-            this.theatre.app.applyCameraRotation();
-        }
         if (this.theatre.networkManager && this.theatre.camera) {
             this.theatre.networkManager.updatePosition(this.theatre.camera.position);
         }
