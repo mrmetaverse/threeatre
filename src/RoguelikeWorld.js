@@ -39,11 +39,12 @@ export class RoguelikeWorld {
         this.savedBg = this.scene.background?.clone();
         this.savedFog = this.scene.fog;
 
-        this.scene.background = new THREE.Color(0x1a2740);
-        this.scene.fog = new THREE.FogExp2(0x223557, 0.0015);
+        this.scene.background = new THREE.Color(0x1c2b45);
+        this.scene.fog = new THREE.FogExp2(0x2a3f63, 0.0009);
 
         this.buildGround();
         this.buildAtmosphere();
+        this.buildNearSpawnLandmarks();
         this.buildReturnPortal();
         this.buildTemples();
         this.scatterSpookyDecor();
@@ -56,6 +57,7 @@ export class RoguelikeWorld {
             temples: this.temples.length,
             ghosts: this.ghosts.length
         });
+        this.showWorldDebugOverlay();
     }
 
     buildGround() {
@@ -88,7 +90,7 @@ export class RoguelikeWorld {
     }
 
     buildAtmosphere() {
-        const particleCount = 300;
+        const particleCount = 120;
         const positions = new Float32Array(particleCount * 3);
         for (let i = 0; i < particleCount; i++) {
             positions[i * 3] = (Math.random() - 0.5) * 400;
@@ -101,7 +103,7 @@ export class RoguelikeWorld {
             color: 0x9aa9c0,
             size: 1.3,
             transparent: true,
-            opacity: 0.06,
+            opacity: 0.03,
             depthWrite: false
         });
         const fogParticles = new THREE.Points(fogGeo, fogMat);
@@ -143,6 +145,31 @@ export class RoguelikeWorld {
         templeConfigs.forEach(cfg => {
             this.buildTemple(cfg);
         });
+    }
+
+    buildNearSpawnLandmarks() {
+        // Guaranteed visible objectives close to spawn so the world never feels blank.
+        const center = new THREE.Vector3(0, 0, 92);
+        const ringRadius = 14;
+        for (let i = 0; i < 4; i++) {
+            const angle = (i / 4) * Math.PI * 2;
+            const x = center.x + Math.cos(angle) * ringRadius;
+            const z = center.z + Math.sin(angle) * ringRadius;
+
+            const monolith = new THREE.Mesh(
+                new THREE.BoxGeometry(2, 9, 2),
+                new THREE.MeshLambertMaterial({ color: 0x5a4b35 })
+            );
+            monolith.position.set(x, 4.5, z);
+            monolith.castShadow = true;
+            this.scene.add(monolith);
+            this.worldObjects.push(monolith);
+
+            const torch = new THREE.PointLight(0xffaa55, 2.5, 36);
+            torch.position.set(x, 8.5, z);
+            this.scene.add(torch);
+            this.worldLights.push(torch);
+        }
     }
 
     buildTemple(cfg) {
@@ -339,6 +366,32 @@ export class RoguelikeWorld {
     }
 
     spawnGhosts() {
+        const camPos = this.theatre?.camera?.position?.clone() || new THREE.Vector3(0, 1.6, 88);
+
+        // Guaranteed nearby pressure right after exiting the theatre.
+        for (let i = 0; i < 4; i++) {
+            const ghost = this.createGhost();
+            const angle = (i / 4) * Math.PI * 2 + Math.random() * 0.3;
+            const radius = 12 + Math.random() * 10;
+            const x = camPos.x + Math.cos(angle) * radius;
+            const z = camPos.z + Math.sin(angle) * radius + 10;
+            const baseSpeed = 5.4 + Math.random() * 2.6;
+            ghost.position.set(x, 2, z);
+            this.scene.add(ghost);
+            this.ghosts.push({
+                mesh: ghost,
+                position: ghost.position.clone(),
+                target: null,
+                speed: baseSpeed,
+                baseSpeed: baseSpeed,
+                lastPlayerDistance: Infinity,
+                aggroRange: 160 + Math.random() * 70,
+                killRange: 2.6,
+                health: 2 + Math.floor(Math.random() * 3),
+                alerted: true
+            });
+        }
+
         for (let i = 0; i < 12; i++) {
             const ghost = this.createGhost();
             const nearSpawn = i < 5;
@@ -354,7 +407,7 @@ export class RoguelikeWorld {
                 speed: baseSpeed,
                 baseSpeed: baseSpeed,
                 lastPlayerDistance: Infinity,
-                aggroRange: 120 + Math.random() * 70,
+                aggroRange: 130 + Math.random() * 80,
                 killRange: 2.4,
                 health: 2 + Math.floor(Math.random() * 3),
                 alerted: nearSpawn
@@ -751,6 +804,17 @@ export class RoguelikeWorld {
         d.innerHTML = `<div style="font-size:20px;margin-bottom:6px;">BEWARE THE DARKNESS</div><span style="font-size:13px;color:#ccc;">Temples glow in the distance... reach them for treasure, but ghosts guard the way.<br>Throw tomatoes (T) to fight back. Sprint (Shift) to run.</span>`;
         document.body.appendChild(d);
         setTimeout(() => { if (document.body.contains(d)) d.remove(); }, 6000);
+    }
+
+    showWorldDebugOverlay() {
+        const existing = document.getElementById('world-debug-overlay');
+        if (existing) existing.remove();
+        const d = document.createElement('div');
+        d.id = 'world-debug-overlay';
+        d.style.cssText = 'position:fixed;top:16px;right:16px;background:rgba(0,0,0,0.75);color:#7dff9a;border:1px solid #2a7f44;border-radius:8px;padding:8px 10px;font-size:12px;z-index:1200;';
+        d.textContent = `world active | temples:${this.temples.length} | ghosts:${this.ghosts.length} | lights:${this.worldLights.length}`;
+        document.body.appendChild(d);
+        setTimeout(() => d.remove(), 8000);
     }
 
     hideTheatre() {
