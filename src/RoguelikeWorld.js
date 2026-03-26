@@ -27,6 +27,8 @@ export class RoguelikeWorld {
         this.enterTimestamp = 0;
         this.returnCooldownMs = 2500;
         this.ghostGracePeriodMs = 7000;
+        this.templeSafeRadius = 18;
+        this.lastSafeZoneMessageAt = 0;
 
         this.walls = [];
         this.floors = [];
@@ -138,10 +140,10 @@ export class RoguelikeWorld {
 
     buildTemples() {
         const templeConfigs = [
-            { pos: new THREE.Vector3(0, 0, 102), color: 0xff6600, name: 'Ember Shrine', beaconColor: 0xff4400, dist: 'near' },
-            { pos: new THREE.Vector3(-45, 0, 150), color: 0x44aaff, name: 'Frost Sanctum', beaconColor: 0x2288ff, dist: 'mid' },
-            { pos: new THREE.Vector3(55, 0, 170), color: 0xaa44ff, name: 'Void Temple', beaconColor: 0x8822ff, dist: 'far' },
-            { pos: new THREE.Vector3(-20, 0, 220), color: 0xffdd00, name: 'Golden Ziggurat', beaconColor: 0xffaa00, dist: 'far' },
+            { pos: new THREE.Vector3(-95, 0, 150), color: 0xff6600, name: 'Ember Shrine', beaconColor: 0xff4400, dist: 'far' },
+            { pos: new THREE.Vector3(110, 0, 185), color: 0x44aaff, name: 'Frost Sanctum', beaconColor: 0x2288ff, dist: 'far' },
+            { pos: new THREE.Vector3(-125, 0, 250), color: 0xaa44ff, name: 'Void Temple', beaconColor: 0x8822ff, dist: 'far' },
+            { pos: new THREE.Vector3(105, 0, 295), color: 0xffdd00, name: 'Golden Ziggurat', beaconColor: 0xffaa00, dist: 'far' },
         ];
 
         templeConfigs.forEach(cfg => {
@@ -252,6 +254,20 @@ export class RoguelikeWorld {
         const beam = new THREE.Mesh(beamGeo, beamMat);
         beam.position.y = stepsCount * 0.6 + 17;
         group.add(beam);
+
+        // Temple safe zone ring: entering this area protects player from ghost kills.
+        const safeRing = new THREE.Mesh(
+            new THREE.RingGeometry(this.templeSafeRadius - 0.6, this.templeSafeRadius, 48),
+            new THREE.MeshBasicMaterial({
+                color: 0x66ffcc,
+                transparent: true,
+                opacity: 0.22,
+                side: THREE.DoubleSide
+            })
+        );
+        safeRing.rotation.x = -Math.PI / 2;
+        safeRing.position.y = 0.08;
+        group.add(safeRing);
 
         this.scene.add(group);
         this.worldObjects.push(group);
@@ -383,13 +399,13 @@ export class RoguelikeWorld {
         const camPos = this.theatre?.camera?.position?.clone() || new THREE.Vector3(0, 1.6, 88);
 
         // Guaranteed nearby pressure right after exiting the theatre.
-        for (let i = 0; i < 4; i++) {
+        for (let i = 0; i < 2; i++) {
             const ghost = this.createGhost();
             const angle = (i / 4) * Math.PI * 2 + Math.random() * 0.3;
             const radius = 12 + Math.random() * 10;
             const x = camPos.x + Math.cos(angle) * radius;
             const z = camPos.z + Math.sin(angle) * radius + 10;
-            const baseSpeed = 5.4 + Math.random() * 2.6;
+            const baseSpeed = 2.6 + Math.random() * 1.4; // units/sec
             ghost.position.set(x, 2, z);
             this.scene.add(ghost);
             this.ghosts.push({
@@ -399,19 +415,19 @@ export class RoguelikeWorld {
                 speed: baseSpeed,
                 baseSpeed: baseSpeed,
                 lastPlayerDistance: Infinity,
-                aggroRange: 160 + Math.random() * 70,
+                aggroRange: 85 + Math.random() * 35,
                 killRange: 2.0,
                 health: 2 + Math.floor(Math.random() * 3),
                 alerted: true
             });
         }
 
-        for (let i = 0; i < 12; i++) {
+        for (let i = 0; i < 6; i++) {
             const ghost = this.createGhost();
-            const nearSpawn = i < 5;
+            const nearSpawn = i < 2;
             const x = nearSpawn ? (Math.random() - 0.5) * 60 : (Math.random() - 0.5) * 250;
             const z = nearSpawn ? 100 + Math.random() * 50 : 120 + Math.random() * 200;
-            const baseSpeed = 4.2 + Math.random() * 2.8; // units/sec
+            const baseSpeed = 2.2 + Math.random() * 1.5; // units/sec
             ghost.position.set(x, 2, z);
             this.scene.add(ghost);
             this.ghosts.push({
@@ -421,12 +437,22 @@ export class RoguelikeWorld {
                 speed: baseSpeed,
                 baseSpeed: baseSpeed,
                 lastPlayerDistance: Infinity,
-                aggroRange: 130 + Math.random() * 80,
+                aggroRange: 70 + Math.random() * 35,
                 killRange: 2.0,
                 health: 2 + Math.floor(Math.random() * 3),
                 alerted: nearSpawn
             });
         }
+    }
+
+    getSafeTempleForPosition(position) {
+        if (!position || this.temples.length === 0) return null;
+        for (const temple of this.temples) {
+            if (position.distanceTo(temple.position) <= this.templeSafeRadius) {
+                return temple;
+            }
+        }
+        return null;
     }
 
     createGhost() {
@@ -559,10 +585,17 @@ export class RoguelikeWorld {
         if (!playerPosition) return;
         const dist = ghost.position.distanceTo(playerPosition);
         const inGraceWindow = (Date.now() - this.enterTimestamp) < this.ghostGracePeriodMs;
+        const safeTemple = this.getSafeTempleForPosition(playerPosition);
+        const playerInSafeZone = !!safeTemple;
 
-        if (!inGraceWindow && dist < ghost.killRange) { this.killPlayer(); return; }
+        if (playerInSafeZone && (Date.now() - this.lastSafeZoneMessageAt) > 2500) {
+            this.lastSafeZoneMessageAt = Date.now();
+            this.showSafeZoneMessage(safeTemple.name);
+        }
 
-        const shouldChase = ghost.alerted || dist < ghost.aggroRange;
+        if (!inGraceWindow && !playerInSafeZone && dist < ghost.killRange) { this.killPlayer(); return; }
+
+        const shouldChase = !playerInSafeZone && (ghost.alerted || dist < ghost.aggroRange);
 
         if (shouldChase) {
             const dir = new THREE.Vector3().subVectors(playerPosition, ghost.position).normalize();
@@ -573,8 +606,16 @@ export class RoguelikeWorld {
             ghost.mesh.position.x = ghost.position.x;
             ghost.mesh.position.z = ghost.position.z;
             ghost.mesh.lookAt(playerPosition.x, ghost.mesh.position.y, playerPosition.z);
-            ghost.speed = Math.min(8.6, ghost.speed + 0.9 * deltaTime);
+            ghost.speed = Math.min(5.2, ghost.speed + 0.55 * deltaTime);
         } else {
+            if (playerInSafeZone) {
+                // Repel ghosts away from temple safe area edge while player is safe.
+                const retreatDir = new THREE.Vector3().subVectors(ghost.position, safeTemple.position).normalize();
+                ghost.position.addScaledVector(retreatDir, Math.max(2.0, ghost.baseSpeed) * deltaTime);
+                ghost.mesh.position.x = ghost.position.x;
+                ghost.mesh.position.z = ghost.position.z;
+                ghost.mesh.lookAt(safeTemple.position.x, ghost.mesh.position.y, safeTemple.position.z);
+            }
             if (Math.random() < 0.02) {
                 const wander = new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
                 ghost.position.addScaledVector(wander, ghost.baseSpeed * 0.45 * deltaTime);
@@ -591,6 +632,20 @@ export class RoguelikeWorld {
         ghost.position.z = Math.max(80, Math.min(320, ghost.position.z));
         ghost.mesh.position.x = ghost.position.x;
         ghost.mesh.position.z = ghost.position.z;
+    }
+
+    showSafeZoneMessage(templeName) {
+        const id = 'temple-safe-zone-message';
+        const existing = document.getElementById(id);
+        if (existing) existing.remove();
+        const d = document.createElement('div');
+        d.id = id;
+        d.style.cssText = 'position:fixed;top:74px;left:50%;transform:translateX(-50%);background:rgba(0,40,30,0.86);border:2px solid #66ffcc;border-radius:10px;padding:8px 14px;color:#aaffee;font-size:13px;z-index:1300;';
+        d.textContent = `${templeName} safe zone: ghosts cannot kill you here`;
+        document.body.appendChild(d);
+        setTimeout(() => {
+            if (document.body.contains(d)) d.remove();
+        }, 2200);
     }
 
     checkMultipleTreasures(playerPosition) {
