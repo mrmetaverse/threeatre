@@ -1,8 +1,7 @@
-import { WearableManager } from './WearableManager.js';
-
 export class Bindle {
     constructor(networkManager) {
         this.networkManager = networkManager;
+        this.app = null;
         this.isOpen = false;
         this.inventory = new Array(8 * 10).fill(null); // 8x10 grid like Diablo II
         this.equipment = {
@@ -28,6 +27,7 @@ export class Bindle {
         this.loadedWearables = new Map(); // Cache for loaded 3D models
         this.draggedItem = null;
         this.draggedFromSlot = null;
+        this.activeEffects = new Map();
         
         this.init();
     }
@@ -46,6 +46,10 @@ export class Bindle {
     
     setWearableManager(wearableManager) {
         this.wearableManager = wearableManager;
+    }
+
+    setApp(app) {
+        this.app = app;
     }
     
     createBindleUI() {
@@ -190,6 +194,7 @@ export class Bindle {
                 font-size: 12px;
             `;
             slotDiv.innerHTML = `<span style="margin-right: 8px;">${slot.icon}</span>${slot.name}`;
+            slotDiv.addEventListener('click', () => this.unequipItem(slot.id));
             
             panel.appendChild(slotDiv);
         });
@@ -253,6 +258,11 @@ export class Bindle {
             
             slot.addEventListener('dragover', (e) => e.preventDefault());
             slot.addEventListener('drop', (e) => this.handleDrop(e, i));
+            slot.addEventListener('click', () => this.handleInventorySlotClick(i));
+            slot.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                this.handleInventorySlotClick(i);
+            });
             
             inventoryGrid.appendChild(slot);
         }
@@ -419,11 +429,42 @@ export class Bindle {
         
         console.log(`Moved ${fromItem?.name} from slot ${fromSlot} to ${toSlot}`);
     }
+
+    handleInventorySlotClick(slotIndex) {
+        const item = this.inventory[slotIndex];
+        if (!item) return;
+
+        if (item.type === 'equipment' || item.type === 'wearable') {
+            const equipped = this.equipItem(item, slotIndex);
+            if (!equipped) {
+                this.showMessage(`Cannot equip ${item.name} in this slot`, 'error');
+            }
+            return;
+        }
+
+        if (item.type === 'consumable') {
+            this.useConsumable(item, slotIndex);
+        }
+    }
+
+    normalizeEquipmentSlot(slot) {
+        const aliases = {
+            chest: 'torso',
+            torso: 'torso',
+            ring: 'finger',
+            hand: 'rightHand',
+            weapon: 'rightHand'
+        };
+        return aliases[slot] || slot;
+    }
     
     equipItem(item, slotIndex) {
         if (!item || (item.type !== 'equipment' && item.type !== 'wearable')) return false;
         
-        const equipSlot = item.slot;
+        let equipSlot = this.normalizeEquipmentSlot(item.slot);
+        if (equipSlot === 'finger') {
+            equipSlot = this.equipment.accessory1 ? 'accessory2' : 'accessory1';
+        }
         if (!this.equipment.hasOwnProperty(equipSlot)) return false;
         
         // Unequip current item if any
@@ -458,6 +499,30 @@ export class Bindle {
         this.applyItemEffects();
         
         console.log(`Equipped ${item.name} to ${equipSlot}`);
+        return true;
+    }
+
+    unequipItem(slotType) {
+        const equipSlot = this.normalizeEquipmentSlot(slotType);
+        const item = this.equipment[equipSlot];
+        if (!item) return false;
+
+        const emptySlot = this.inventory.findIndex(slot => slot === null);
+        if (emptySlot === -1) {
+            this.showMessage('No empty inventory slot available', 'error');
+            return false;
+        }
+
+        if (item.type === 'wearable') {
+            this.unequipWearable(item);
+        }
+
+        this.equipment[equipSlot] = null;
+        this.inventory[emptySlot] = item;
+        this.updateEquipmentSlotUI(equipSlot, null);
+        this.updateInventorySlotUI(emptySlot, item);
+        this.applyItemEffects();
+        this.showMessage(`Unequipped ${item.name}`, 'info');
         return true;
     }
     
@@ -497,7 +562,8 @@ export class Bindle {
     }
     
     updateEquipmentSlotUI(slotType, item) {
-        const slot = document.querySelector(`[data-slot-type="${slotType}"]`);
+        const uiSlotType = slotType === 'torso' ? 'chest' : slotType;
+        const slot = document.querySelector(`[data-slot-type="${uiSlotType}"]`);
         if (!slot) return;
         
         if (item) {
@@ -525,18 +591,100 @@ export class Bindle {
             }
         });
         
-        // Apply effects to player (you can expand this)
-        if (totalStats.speed) {
-            // Increase movement speed
-            console.log(`Speed bonus: +${totalStats.speed}`);
+        if (this.app?.setItemBonuses) {
+            this.app.setItemBonuses(totalStats);
         }
-        
-        if (totalStats.power) {
-            // Increase tomato throwing power
-            console.log(`Power bonus: +${totalStats.power}`);
-        }
-        
+
         console.log('Applied equipment effects:', totalStats);
+    }
+
+    useConsumable(item, slotIndex) {
+        if (!item || item.type !== 'consumable') return false;
+
+        this.applyConsumableEffect(item);
+
+        if (item.stackable) {
+            item.quantity = Math.max(0, (item.quantity || 1) - 1);
+            if (item.quantity <= 0) {
+                this.inventory[slotIndex] = null;
+                this.updateInventorySlotUI(slotIndex, null);
+            } else {
+                this.updateInventorySlotUI(slotIndex, item);
+            }
+        } else {
+            this.inventory[slotIndex] = null;
+            this.updateInventorySlotUI(slotIndex, null);
+        }
+
+        return true;
+    }
+
+    applyTimedEffect(key, durationMs, onApply, onExpire) {
+        if (this.activeEffects.has(key)) {
+            clearTimeout(this.activeEffects.get(key));
+            this.activeEffects.delete(key);
+        }
+
+        if (onApply) onApply();
+
+        const timeout = setTimeout(() => {
+            if (onExpire) onExpire();
+            this.activeEffects.delete(key);
+        }, durationMs);
+        this.activeEffects.set(key, timeout);
+    }
+
+    applyConsumableEffect(item) {
+        const name = (item.name || '').toLowerCase();
+
+        if (name.includes('tomato')) {
+            this.showMessage(`${item.name} ready. Throw with T.`, 'info');
+            return;
+        }
+
+        if (name.includes('popcorn')) {
+            this.applyTimedEffect(
+                'popcorn-speed',
+                12000,
+                () => {
+                    if (this.app?.setItemBonuses) {
+                        const next = { ...(this.app.itemBonuses || {}) };
+                        next.speed = (next.speed || 0) + 1;
+                        this.app.setItemBonuses(next);
+                    }
+                    this.showMessage('Popcorn sugar rush: speed boosted', 'info');
+                },
+                () => {
+                    this.applyItemEffects();
+                    this.showMessage('Popcorn effect faded', 'info');
+                }
+            );
+            return;
+        }
+
+        if (name.includes('courage potion')) {
+            this.applyTimedEffect(
+                'courage-potion',
+                30000,
+                () => {
+                    if (this.app?.setItemBonuses) {
+                        const next = { ...(this.app.itemBonuses || {}) };
+                        next.speed = (next.speed || 0) + 2;
+                        next.power = (next.power || 0) + 2;
+                        next.protection = (next.protection || 0) + 2;
+                        this.app.setItemBonuses(next);
+                    }
+                    this.showMessage('Courage potion active', 'info');
+                },
+                () => {
+                    this.applyItemEffects();
+                    this.showMessage('Courage potion wore off', 'info');
+                }
+            );
+            return;
+        }
+
+        this.showMessage(`Used ${item.name}`, 'info');
     }
     
     addLoot(lootItem) {
@@ -645,6 +793,9 @@ export class Bindle {
     }
     
     dispose() {
+        this.activeEffects.forEach((timeoutId) => clearTimeout(timeoutId));
+        this.activeEffects.clear();
+
         const container = document.getElementById('bindle-container');
         const toggle = document.getElementById('bindle-toggle');
         

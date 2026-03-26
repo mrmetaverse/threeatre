@@ -29,6 +29,21 @@ export class RoguelikeWorld {
         this.ghostGracePeriodMs = 7000;
         this.templeSafeRadius = 18;
         this.lastSafeZoneMessageAt = 0;
+        this.templeCellSize = 250;
+        this.templeGenerationRadius = 1;
+        this.templeDespawnDistance = 980;
+        this.templeCellMap = new Map();
+        this.templeNameSeedsA = ['Ember', 'Frost', 'Void', 'Golden', 'Ashen', 'Storm', 'Moon', 'Dread', 'Ancient', 'Whispering'];
+        this.templeNameSeedsB = ['Shrine', 'Sanctum', 'Temple', 'Citadel', 'Ziggurat', 'Bastion', 'Spire', 'Vault', 'Monastery', 'Cathedral'];
+        this.theatreLandmarkPosition = new THREE.Vector3(0, 0, 70);
+        this.groundTileSize = 320;
+        this.groundTileRadius = 2;
+        this.groundTiles = new Map();
+        this.groundTexture = null;
+        this._outsideCullFrustum = new THREE.Frustum();
+        this._outsideCullProjScreen = new THREE.Matrix4();
+        this._lastOutsideCullMs = 0;
+        this._outsideCullIntervalMs = 150;
 
         this.walls = [];
         this.floors = [];
@@ -42,14 +57,14 @@ export class RoguelikeWorld {
         this.savedBg = this.scene.background?.clone();
         this.savedFog = this.scene.fog;
 
-        this.scene.background = new THREE.Color(0x1c2b45);
-        this.scene.fog = new THREE.FogExp2(0x2a3f63, 0.0009);
+        this.scene.background = new THREE.Color(0x101a2e);
+        this.scene.fog = new THREE.FogExp2(0x1b2742, 0.0018);
 
         this.buildGround();
         this.buildAtmosphere();
         this.buildNearSpawnLandmarks();
-        this.buildReturnPortal();
-        this.buildTemples();
+        this.buildReturnTheatreLandmark();
+        this.buildTemplesNearPosition(this.theatre?.camera?.position || new THREE.Vector3(0, 1.6, 88), true);
         this.scatterSpookyDecor();
         this.spawnGhosts();
         this.setupWorldLighting();
@@ -78,23 +93,68 @@ export class RoguelikeWorld {
             ctx.fillStyle = `rgb(${shade}, ${shade + 4}, ${shade + 8})`;
             ctx.fillRect(x, y, 2 + Math.random() * 3, 2 + Math.random() * 3);
         }
-        const tex = new THREE.CanvasTexture(canvas);
-        tex.wrapS = THREE.RepeatWrapping;
-        tex.wrapT = THREE.RepeatWrapping;
-        tex.repeat.set(40, 40);
+        this.groundTexture = new THREE.CanvasTexture(canvas);
+        this.groundTexture.wrapS = THREE.RepeatWrapping;
+        this.groundTexture.wrapT = THREE.RepeatWrapping;
+        this.groundTexture.repeat.set(20, 20);
 
-        const geo = new THREE.PlaneGeometry(600, 600);
-        const mat = new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide });
-        const ground = new THREE.Mesh(geo, mat);
-        ground.rotation.x = -Math.PI / 2;
-        ground.position.set(0, -0.05, 180);
-        ground.receiveShadow = true;
-        this.scene.add(ground);
-        this.worldObjects.push(ground);
+        const initialPos = this.theatre?.camera?.position || new THREE.Vector3(0, 1.6, 88);
+        this.buildGroundTilesNearPosition(initialPos);
+    }
+
+    getGroundTileKey(tileX, tileZ) {
+        return `${tileX}:${tileZ}`;
+    }
+
+    createGroundTile(tileX, tileZ) {
+        const geo = new THREE.PlaneGeometry(this.groundTileSize, this.groundTileSize);
+        const mat = new THREE.MeshLambertMaterial({ map: this.groundTexture, side: THREE.DoubleSide });
+        const tile = new THREE.Mesh(geo, mat);
+        tile.rotation.x = -Math.PI / 2;
+        tile.position.set(tileX * this.groundTileSize, -0.05, tileZ * this.groundTileSize);
+        tile.receiveShadow = true;
+        tile.userData.isGroundTile = true;
+        this.scene.add(tile);
+        this.worldObjects.push(tile);
+        return tile;
+    }
+
+    buildGroundTilesNearPosition(position) {
+        const tileX = Math.round(position.x / this.groundTileSize);
+        const tileZ = Math.round(position.z / this.groundTileSize);
+
+        for (let dx = -this.groundTileRadius; dx <= this.groundTileRadius; dx++) {
+            for (let dz = -this.groundTileRadius; dz <= this.groundTileRadius; dz++) {
+                const gx = tileX + dx;
+                const gz = tileZ + dz;
+                const key = this.getGroundTileKey(gx, gz);
+                if (!this.groundTiles.has(key)) {
+                    this.groundTiles.set(key, this.createGroundTile(gx, gz));
+                }
+            }
+        }
+
+        const remove = [];
+        for (const [key, tile] of this.groundTiles.entries()) {
+            const tx = Math.round(tile.position.x / this.groundTileSize);
+            const tz = Math.round(tile.position.z / this.groundTileSize);
+            if (Math.abs(tx - tileX) > this.groundTileRadius + 1 || Math.abs(tz - tileZ) > this.groundTileRadius + 1) {
+                remove.push(key);
+            }
+        }
+        remove.forEach((key) => {
+            const tile = this.groundTiles.get(key);
+            if (!tile) return;
+            this.scene.remove(tile);
+            if (tile.geometry) tile.geometry.dispose();
+            if (tile.material) tile.material.dispose();
+            this.worldObjects = this.worldObjects.filter((obj) => obj !== tile);
+            this.groundTiles.delete(key);
+        });
     }
 
     buildAtmosphere() {
-        const particleCount = 120;
+        const particleCount = 220;
         const positions = new Float32Array(particleCount * 3);
         for (let i = 0; i < particleCount; i++) {
             positions[i * 3] = (Math.random() - 0.5) * 400;
@@ -107,47 +167,261 @@ export class RoguelikeWorld {
             color: 0x9aa9c0,
             size: 1.3,
             transparent: true,
-            opacity: 0.03,
+            opacity: 0.06,
             depthWrite: false
         });
         const fogParticles = new THREE.Points(fogGeo, fogMat);
         fogParticles.userData.isAtmosphere = true;
         this.scene.add(fogParticles);
         this.worldObjects.push(fogParticles);
+
+        const starsGeo = new THREE.BufferGeometry();
+        const starCount = 1300;
+        const starPositions = new Float32Array(starCount * 3);
+        for (let i = 0; i < starCount; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const radius = 280 + Math.random() * 320;
+            const y = 55 + Math.random() * 180;
+            starPositions[i * 3] = Math.cos(angle) * radius;
+            starPositions[i * 3 + 1] = y;
+            starPositions[i * 3 + 2] = 70 + Math.sin(angle) * radius;
+        }
+        starsGeo.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+        const starsMat = new THREE.PointsMaterial({
+            color: 0xbfd2ff,
+            size: 1.25,
+            transparent: true,
+            opacity: 0.78,
+            depthWrite: false
+        });
+        const stars = new THREE.Points(starsGeo, starsMat);
+        stars.userData.isStars = true;
+        this.scene.add(stars);
+        this.worldObjects.push(stars);
     }
 
-    buildReturnPortal() {
-        const portalGeo = new THREE.TorusGeometry(3, 0.4, 16, 32);
-        const portalMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc, transparent: true, opacity: 0.6 });
-        const portal = new THREE.Mesh(portalGeo, portalMat);
-        portal.position.set(0, 3, 70);
-        portal.rotation.y = Math.PI;
-        this.scene.add(portal);
-        this.worldObjects.push(portal);
+    buildReturnTheatreLandmark() {
+        const theatreLandmark = new THREE.Group();
+        theatreLandmark.position.set(0, 0, 70);
+        theatreLandmark.name = 'outside-theatre-landmark';
+        theatreLandmark.userData.noCollision = true;
 
-        const portalLight = new THREE.PointLight(0x00ffcc, 2, 20);
-        portalLight.position.set(0, 3, 70);
+        const base = new THREE.Mesh(
+            new THREE.BoxGeometry(54, 20, 36),
+            new THREE.MeshLambertMaterial({ color: 0x2f261d })
+        );
+        base.position.set(0, 10, -12);
+        base.userData.noCollision = true;
+        theatreLandmark.add(base);
+
+        const roof = new THREE.Mesh(
+            new THREE.ConeGeometry(36, 14, 4),
+            new THREE.MeshLambertMaterial({ color: 0x231a12 })
+        );
+        roof.position.set(0, 26, -12);
+        roof.rotation.y = Math.PI * 0.25;
+        roof.userData.noCollision = true;
+        theatreLandmark.add(roof);
+
+        const screenFacade = new THREE.Mesh(
+            new THREE.PlaneGeometry(22, 12),
+            new THREE.MeshBasicMaterial({ color: 0x3a5066 })
+        );
+        screenFacade.position.set(0, 13, -29.4);
+        screenFacade.userData.noCollision = true;
+        theatreLandmark.add(screenFacade);
+
+        const entranceGlow = new THREE.Mesh(
+            new THREE.PlaneGeometry(12, 16),
+            new THREE.MeshBasicMaterial({ color: 0x00ffcc, transparent: true, opacity: 0.72 })
+        );
+        entranceGlow.position.set(0, 8, 0.1);
+        entranceGlow.userData.noCollision = true;
+        theatreLandmark.add(entranceGlow);
+
+        const portalRing = new THREE.Mesh(
+            new THREE.TorusGeometry(4.2, 0.5, 16, 36),
+            new THREE.MeshBasicMaterial({ color: 0x00ffcc, transparent: true, opacity: 0.8 })
+        );
+        portalRing.position.set(0, 8, 0.3);
+        portalRing.userData.noCollision = true;
+        theatreLandmark.add(portalRing);
+
+        const returnBeacon = new THREE.Mesh(
+            new THREE.CylinderGeometry(1.4, 4.5, 62, 12, 1, true),
+            new THREE.MeshBasicMaterial({
+                color: 0x00ffcc,
+                transparent: true,
+                opacity: 0.12,
+                side: THREE.DoubleSide
+            })
+        );
+        returnBeacon.position.set(0, 34, 1);
+        returnBeacon.userData.noCollision = true;
+        theatreLandmark.add(returnBeacon);
+
+        this.scene.add(theatreLandmark);
+        this.worldObjects.push(theatreLandmark);
+
+        const portalLight = new THREE.PointLight(0x00ffcc, 3, 70);
+        portalLight.position.set(0, 10, 70);
         this.scene.add(portalLight);
         this.worldLights.push(portalLight);
 
-        const signGeo = new THREE.PlaneGeometry(5, 1.5);
-        const signMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc, transparent: true, opacity: 0.4, side: THREE.DoubleSide });
-        const sign = new THREE.Mesh(signGeo, signMat);
-        sign.position.set(0, 7, 70);
-        this.scene.add(sign);
-        this.worldObjects.push(sign);
+        const theatreTopLight = new THREE.PointLight(0x88ccff, 2.5, 120);
+        theatreTopLight.position.set(0, 29, 58);
+        this.scene.add(theatreTopLight);
+        this.worldLights.push(theatreTopLight);
     }
 
-    buildTemples() {
-        const templeConfigs = [
-            { pos: new THREE.Vector3(-165, 0, 185), color: 0xff6600, name: 'Ember Shrine', beaconColor: 0xff4400, dist: 'grand' },
-            { pos: new THREE.Vector3(175, 0, 235), color: 0x44aaff, name: 'Frost Sanctum', beaconColor: 0x2288ff, dist: 'grand' },
-            { pos: new THREE.Vector3(-185, 0, 330), color: 0xaa44ff, name: 'Void Temple', beaconColor: 0x8822ff, dist: 'grand' },
-            { pos: new THREE.Vector3(165, 0, 390), color: 0xffdd00, name: 'Golden Ziggurat', beaconColor: 0xffaa00, dist: 'grand' },
-        ];
+    hash2D(x, z) {
+        const s = Math.sin((x * 127.1) + (z * 311.7)) * 43758.5453123;
+        return s - Math.floor(s);
+    }
 
-        templeConfigs.forEach(cfg => {
-            this.buildTemple(cfg);
+    seededRange(x, z, salt, min, max) {
+        const v = this.hash2D(x + (salt * 17.13), z - (salt * 9.73));
+        return min + (max - min) * v;
+    }
+
+    getTempleCellKey(cellX, cellZ) {
+        return `${cellX}:${cellZ}`;
+    }
+
+    createTempleConfigForCell(cellX, cellZ) {
+        const centerX = cellX * this.templeCellSize;
+        const centerZ = cellZ * this.templeCellSize;
+        const jitterX = this.seededRange(cellX, cellZ, 1, -52, 52);
+        const jitterZ = this.seededRange(cellX, cellZ, 2, -52, 52);
+        const pos = new THREE.Vector3(centerX + jitterX, 0, centerZ + jitterZ);
+        if (pos.z < 95) {
+            pos.z = 95 + this.seededRange(cellX, cellZ, 3, 0, 40);
+        }
+
+        const palette = [
+            { color: 0xff6600, beaconColor: 0xff4400 },
+            { color: 0x44aaff, beaconColor: 0x2288ff },
+            { color: 0xaa44ff, beaconColor: 0x8822ff },
+            { color: 0xffdd00, beaconColor: 0xffaa00 },
+            { color: 0x66ffbb, beaconColor: 0x33ffaa },
+            { color: 0xff6677, beaconColor: 0xff3344 }
+        ];
+        const paletteIndex = Math.floor(this.seededRange(cellX, cellZ, 4, 0, palette.length - 0.0001));
+        const style = palette[paletteIndex];
+
+        const nameA = this.templeNameSeedsA[Math.floor(this.seededRange(cellX, cellZ, 5, 0, this.templeNameSeedsA.length - 0.0001))];
+        const nameB = this.templeNameSeedsB[Math.floor(this.seededRange(cellX, cellZ, 6, 0, this.templeNameSeedsB.length - 0.0001))];
+        const name = `${nameA} ${nameB}`;
+
+        return {
+            pos,
+            color: style.color,
+            beaconColor: style.beaconColor,
+            name,
+            dist: 'grand',
+            cellKey: this.getTempleCellKey(cellX, cellZ)
+        };
+    }
+
+    shouldSpawnTempleInCell(cellX, cellZ, isCenterCell = false) {
+        if (isCenterCell) return true;
+        const densityRoll = this.hash2D(cellX + 19.7, cellZ - 12.1);
+        return densityRoll > 0.58;
+    }
+
+    buildTemplesNearPosition(position, force = false) {
+        if (!position) return;
+        const cellX = Math.floor(position.x / this.templeCellSize);
+        const cellZ = Math.floor(position.z / this.templeCellSize);
+
+        let spawnedInRing = 0;
+        for (let dx = -this.templeGenerationRadius; dx <= this.templeGenerationRadius; dx++) {
+            for (let dz = -this.templeGenerationRadius; dz <= this.templeGenerationRadius; dz++) {
+                const cx = cellX + dx;
+                const cz = cellZ + dz;
+                const key = this.getTempleCellKey(cx, cz);
+                if (!force && this.templeCellMap.has(key)) continue;
+                const isCenterCell = dx === 0 && dz === 0;
+                if (!force && !this.shouldSpawnTempleInCell(cx, cz, isCenterCell)) continue;
+                const cfg = this.createTempleConfigForCell(cx, cz);
+                const temple = this.buildTemple(cfg);
+                if (temple) {
+                    this.templeCellMap.set(key, temple);
+                    spawnedInRing++;
+                }
+            }
+        }
+
+        // Guarantee at least one nearby temple without overcrowding.
+        if (!force && spawnedInRing === 0) {
+            const fallbackKey = this.getTempleCellKey(cellX, cellZ);
+            if (!this.templeCellMap.has(fallbackKey)) {
+                const fallbackCfg = this.createTempleConfigForCell(cellX, cellZ);
+                const fallbackTemple = this.buildTemple(fallbackCfg);
+                if (fallbackTemple) {
+                    this.templeCellMap.set(fallbackKey, fallbackTemple);
+                }
+            }
+        }
+
+        this.pruneFarTemples(position);
+    }
+
+    pruneFarTemples(playerPosition) {
+        const removeKeys = [];
+        for (const [cellKey, temple] of this.templeCellMap.entries()) {
+            if (!temple?.position) {
+                removeKeys.push(cellKey);
+                continue;
+            }
+            if (temple.position.distanceTo(playerPosition) > this.templeDespawnDistance) {
+                removeKeys.push(cellKey);
+            }
+        }
+
+        removeKeys.forEach((cellKey) => {
+            const temple = this.templeCellMap.get(cellKey);
+            if (!temple) {
+                this.templeCellMap.delete(cellKey);
+                return;
+            }
+
+            if (temple.group) {
+                this.scene.remove(temple.group);
+                temple.group.traverse((child) => {
+                    if (child.geometry) child.geometry.dispose();
+                    if (child.material) {
+                        if (Array.isArray(child.material)) child.material.forEach((m) => m?.dispose && m.dispose());
+                        else child.material.dispose();
+                    }
+                });
+            }
+            if (temple.chest) {
+                this.scene.remove(temple.chest);
+                temple.chest.traverse((child) => {
+                    if (child.geometry) child.geometry.dispose();
+                    if (child.material) {
+                        if (Array.isArray(child.material)) child.material.forEach((m) => m?.dispose && m.dispose());
+                        else child.material.dispose();
+                    }
+                });
+            }
+            if (temple.beaconLight) {
+                const idx = this.worldLights.indexOf(temple.beaconLight);
+                if (idx >= 0) this.worldLights.splice(idx, 1);
+                this.scene.remove(temple.beaconLight);
+            }
+            if (temple.pillarLight) {
+                const idx = this.worldLights.indexOf(temple.pillarLight);
+                if (idx >= 0) this.worldLights.splice(idx, 1);
+                this.scene.remove(temple.pillarLight);
+            }
+
+            this.worldObjects = this.worldObjects.filter((obj) => obj !== temple.group && obj !== temple.chest);
+            this.temples = this.temples.filter((t) => t !== temple);
+            this.landmarks = this.landmarks.filter((lm) => lm.name !== temple.name || !lm.position.equals(temple.position));
+            this.treasureChests = this.treasureChests.filter((tc) => tc.mesh !== temple.chest);
+            this.templeCellMap.delete(cellKey);
         });
     }
 
@@ -192,6 +466,7 @@ export class RoguelikeWorld {
         const { pos, color, name, beaconColor, dist } = cfg;
         const group = new THREE.Group();
         group.position.copy(pos);
+        group.userData.isTemple = true;
         const isGrand = dist === 'grand';
 
         const islandGeo = new THREE.CylinderGeometry(isGrand ? 22 : 12, isGrand ? 30 : 16, isGrand ? 3 : 2, 28);
@@ -280,8 +555,22 @@ export class RoguelikeWorld {
         this.scene.add(chest);
         this.treasureChests.push({ mesh: chest, position: chestPos, opened: false });
 
-        this.temples.push({ group, orb, beaconLight, beam, name, position: pos, color, beaconColor });
+        const templeData = {
+            group,
+            orb,
+            beaconLight,
+            pillarLight,
+            beam,
+            chest,
+            name,
+            position: pos,
+            color,
+            beaconColor,
+            cellKey: cfg.cellKey || null
+        };
+        this.temples.push(templeData);
         this.landmarks.push({ name, position: pos, radius: 14, discovered: false, orb, light: beaconLight });
+        return templeData;
     }
 
     scatterSpookyDecor() {
@@ -350,11 +639,11 @@ export class RoguelikeWorld {
         this.scene.add(moonLight);
         this.worldLights.push(moonLight);
 
-        const ambient = new THREE.AmbientLight(0x405b8f, 1.2);
+        const ambient = new THREE.AmbientLight(0x33466f, 0.92);
         this.scene.add(ambient);
         this.worldLights.push(ambient);
 
-        const hemiLight = new THREE.HemisphereLight(0xa5b9e8, 0x344928, 1.0);
+        const hemiLight = new THREE.HemisphereLight(0x7f95cb, 0x243822, 0.75);
         this.scene.add(hemiLight);
         this.worldLights.push(hemiLight);
 
@@ -377,10 +666,20 @@ export class RoguelikeWorld {
         this.scene.add(guideBeam);
         this.worldObjects.push(guideBeam);
 
-        const spawnFill = new THREE.PointLight(0x88aaff, 3.5, 140);
+        const spawnFill = new THREE.PointLight(0x88aaff, 2.6, 140);
         spawnFill.position.set(0, 8, 90);
         this.scene.add(spawnFill);
         this.worldLights.push(spawnFill);
+
+        const eerieRed = new THREE.PointLight(0x7a2a3f, 1.4, 150);
+        eerieRed.position.set(-90, 12, 190);
+        this.scene.add(eerieRed);
+        this.worldLights.push(eerieRed);
+
+        const eerieBlue = new THREE.PointLight(0x2a3f7a, 1.6, 170);
+        eerieBlue.position.set(95, 14, 240);
+        this.scene.add(eerieBlue);
+        this.worldLights.push(eerieBlue);
 
         const moonGeo = new THREE.SphereGeometry(8, 32, 32);
         const moonMat = new THREE.MeshBasicMaterial({ color: 0xddeeff });
@@ -550,6 +849,10 @@ export class RoguelikeWorld {
         if (playerPosition) {
             this.checkMultipleTreasures(playerPosition);
             this.checkLandmarkDiscovery(playerPosition);
+            this.buildTemplesNearPosition(playerPosition);
+            this.buildGroundTilesNearPosition(playerPosition);
+            this.updateTheatreCompass(playerPosition);
+            this.updateWorldCulling(playerPosition);
         }
 
         this.treasureChests.forEach(tc => {
@@ -572,6 +875,58 @@ export class RoguelikeWorld {
                 }
                 obj.geometry.attributes.position.needsUpdate = true;
             }
+            if (obj.userData?.isStars && obj.material) {
+                obj.material.opacity = 0.62 + Math.sin(time * 0.6) * 0.16;
+            }
+        });
+    }
+
+    updateWorldCulling(playerPosition) {
+        const now = performance.now();
+        if ((now - this._lastOutsideCullMs) < this._outsideCullIntervalMs) return;
+        this._lastOutsideCullMs = now;
+
+        const cam = this.theatre?.camera;
+        if (!cam) return;
+        cam.updateMatrixWorld();
+        this._outsideCullProjScreen.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+        this._outsideCullFrustum.setFromProjectionMatrix(this._outsideCullProjScreen);
+
+        const maxDecorDistance = 420;
+        const maxTempleDistance = 720;
+
+        this.temples.forEach((temple) => {
+            if (!temple?.group) return;
+            const dist = temple.position.distanceTo(playerPosition);
+            const inFrustum = this._outsideCullFrustum.intersectsObject(temple.group);
+            const visible = dist <= maxTempleDistance && inFrustum;
+            temple.group.visible = visible;
+            if (temple.chest) temple.chest.visible = visible;
+        });
+
+        this.worldObjects.forEach((obj) => {
+            if (!obj?.isObject3D) return;
+            if (obj.userData?.isAtmosphere || obj.userData?.isStars || obj.name === 'outside-theatre-landmark') {
+                obj.visible = true;
+                return;
+            }
+            if (obj.userData?.isTemple) {
+                return;
+            }
+            if (obj.userData?.isGroundTile) {
+                obj.visible = true;
+                return;
+            }
+            const dist = obj.position ? obj.position.distanceTo(playerPosition) : 0;
+            const inFrustum = this._outsideCullFrustum.intersectsObject(obj);
+            obj.visible = dist <= maxDecorDistance && inFrustum;
+        });
+
+        this.ghosts.forEach((ghost) => {
+            if (!ghost?.mesh) return;
+            const dist = ghost.position.distanceTo(playerPosition);
+            const inFrustum = this._outsideCullFrustum.intersectsObject(ghost.mesh);
+            ghost.mesh.visible = dist <= 260 && inFrustum;
         });
     }
 
@@ -589,19 +944,30 @@ export class RoguelikeWorld {
         const inGraceWindow = (Date.now() - this.enterTimestamp) < this.ghostGracePeriodMs;
         const safeTemple = this.getSafeTempleForPosition(playerPosition);
         const playerInSafeZone = !!safeTemple;
+        const playerBonuses = this.theatre?.app?.itemBonuses || {};
+        const protectionBonus = Math.max(0, Number(playerBonuses.protection || 0));
+        const stealthBonus = Math.max(0, Number(playerBonuses.stealth || 0));
+        const adjustedAggroRange = Math.max(12, ghost.aggroRange - (stealthBonus * 3));
+        const adjustedKillRange = Math.max(1.2, ghost.killRange - (protectionBonus * 0.15));
 
         if (playerInSafeZone && (Date.now() - this.lastSafeZoneMessageAt) > 2500) {
             this.lastSafeZoneMessageAt = Date.now();
             this.showSafeZoneMessage(safeTemple.name);
         }
 
-        if (!inGraceWindow && !playerInSafeZone && dist < ghost.killRange) { this.killPlayer(); return; }
+        if (!inGraceWindow && !playerInSafeZone && dist < adjustedKillRange) {
+            const resistChance = Math.min(0.45, protectionBonus * 0.08);
+            if (Math.random() > resistChance) {
+                this.killPlayer();
+                return;
+            }
+        }
 
-        const shouldChase = !playerInSafeZone && (ghost.alerted || dist < ghost.aggroRange);
+        const shouldChase = !playerInSafeZone && (ghost.alerted || dist < adjustedAggroRange);
 
         if (shouldChase) {
             const dir = new THREE.Vector3().subVectors(playerPosition, ghost.position).normalize();
-            const norm = 1 - Math.min(dist, ghost.aggroRange) / ghost.aggroRange;
+            const norm = 1 - Math.min(dist, adjustedAggroRange) / adjustedAggroRange;
             const graceMultiplier = inGraceWindow ? 0.38 : 1.0;
             const chaseSpeed = ghost.speed * (1 + norm * 1.2) * graceMultiplier;
             ghost.position.addScaledVector(dir, chaseSpeed * deltaTime);
@@ -625,7 +991,7 @@ export class RoguelikeWorld {
                 ghost.mesh.position.z = ghost.position.z;
             }
             ghost.speed = Math.max(ghost.baseSpeed, ghost.speed - 0.7 * deltaTime);
-            if (dist > ghost.aggroRange * 1.8) {
+            if (dist > adjustedAggroRange * 1.8) {
                 ghost.alerted = false;
             }
         }
@@ -683,6 +1049,7 @@ export class RoguelikeWorld {
 
     createTreasureChest(position) {
         const g = new THREE.Group();
+        g.userData.isTempleChest = true;
         const base = new THREE.Mesh(new THREE.BoxGeometry(2, 1, 1.5), new THREE.MeshLambertMaterial({ color: 0x8B4513 }));
         base.position.y = 0.5; base.castShadow = true; g.add(base);
         const lid = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.3, 1.6), new THREE.MeshLambertMaterial({ color: 0x654321 }));
@@ -919,6 +1286,65 @@ export class RoguelikeWorld {
         document.body.appendChild(d);
     }
 
+    showTheatreCompass() {
+        if (document.getElementById('theatre-compass-overlay')) return;
+        const d = document.createElement('div');
+        d.id = 'theatre-compass-overlay';
+        d.style.cssText = 'position:fixed;top:52px;left:50%;transform:translateX(-50%);background:rgba(8,16,24,0.88);color:#ccf6ff;border:2px solid #40d8ff;border-radius:10px;padding:8px 12px;font-size:13px;z-index:1300;min-width:280px;text-align:center;box-shadow:0 0 18px rgba(64,216,255,0.28);';
+        d.innerHTML = '<span id="theatre-compass-arrow">▲</span> <strong>THEATRE</strong> <span id="theatre-compass-distance">--m</span>';
+        document.body.appendChild(d);
+    }
+
+    hideTheatreCompass() {
+        const el = document.getElementById('theatre-compass-overlay');
+        if (el) el.remove();
+    }
+
+    updateTheatreCompass(playerPosition) {
+        if (!this.isActive || !playerPosition || !this.theatre?.camera) {
+            this.hideTheatreCompass();
+            return;
+        }
+        this.showTheatreCompass();
+
+        const toTheatre = new THREE.Vector3().subVectors(this.theatreLandmarkPosition, playerPosition);
+        const flatToTheatre = new THREE.Vector3(toTheatre.x, 0, toTheatre.z);
+        const distance = Math.max(0, Math.round(flatToTheatre.length()));
+        if (flatToTheatre.lengthSq() < 0.0001) {
+            const distanceEl = document.getElementById('theatre-compass-distance');
+            if (distanceEl) distanceEl.textContent = '0m';
+            return;
+        }
+
+        const cameraForward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.theatre.camera.quaternion);
+        const flatForward = new THREE.Vector3(cameraForward.x, 0, cameraForward.z).normalize();
+        const dir = flatToTheatre.normalize();
+
+        const crossY = (flatForward.x * dir.z) - (flatForward.z * dir.x);
+        const dot = THREE.MathUtils.clamp(flatForward.dot(dir), -1, 1);
+        const angle = Math.acos(dot);
+        const signedAngle = crossY < 0 ? -angle : angle;
+        const deg = Math.round(THREE.MathUtils.radToDeg(signedAngle));
+
+        const arrowEl = document.getElementById('theatre-compass-arrow');
+        const distanceEl = document.getElementById('theatre-compass-distance');
+        const containerEl = document.getElementById('theatre-compass-overlay');
+        if (!arrowEl || !distanceEl || !containerEl) return;
+
+        arrowEl.style.display = 'inline-block';
+        arrowEl.style.transform = `rotate(${deg}deg)`;
+        arrowEl.style.transition = 'transform 80ms linear';
+        distanceEl.textContent = `${distance}m`;
+
+        if (distance < 45) {
+            containerEl.style.borderColor = '#00ffb3';
+            containerEl.style.boxShadow = '0 0 18px rgba(0,255,179,0.35)';
+        } else {
+            containerEl.style.borderColor = '#40d8ff';
+            containerEl.style.boxShadow = '0 0 18px rgba(64,216,255,0.28)';
+        }
+    }
+
     hideTheatre() {
         // Hide all current theatre renderables/lights except avatar objects.
         this.hiddenTheatreObjects = [];
@@ -946,6 +1372,7 @@ export class RoguelikeWorld {
         this.worldLights.forEach(l => this.scene.remove(l));
         const outside = document.getElementById('outside-state-overlay');
         if (outside) outside.remove();
+        this.hideTheatreCompass();
 
         if (this.savedBg) this.scene.background = this.savedBg;
         else this.scene.background = new THREE.Color(0x000011);
@@ -969,8 +1396,15 @@ export class RoguelikeWorld {
         this.worldObjects = []; this.ghosts = []; this.tomatoes = [];
         this.treasureChests = []; this.temples = []; this.landmarks = [];
         this.worldLights = []; this.discoveredLandmarks.clear();
+        this.templeCellMap.clear();
+        this.groundTiles.clear();
+        if (this.groundTexture) {
+            this.groundTexture.dispose();
+            this.groundTexture = null;
+        }
         this.walls = []; this.floors = []; this.outdoorObjects = []; this.collectibles = [];
         this.hideTreasurePrompt();
+        this.hideTheatreCompass();
     }
 
     checkExitCollision(playerPosition) {

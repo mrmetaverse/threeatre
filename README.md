@@ -2,6 +2,8 @@
 
 A collaborative WebXR movie theatre experience built with Three.js and Socket.IO. Created by [mrmetaverse](https://altontech.com)
 
+> "Welcome to Threeatre. Find a seat, start the show... but don't you dare leave the theatre."
+
 
 
 [![License: Custom](https://img.shields.io/badge/License-Custom-blue.svg)](LICENSE) for now, TBD
@@ -18,6 +20,7 @@ A collaborative WebXR movie theatre experience built with Three.js and Socket.IO
 - **Screen Sharing**: Host can share their screen for everyone to watch
 - **Seat Selection**: Click on seats to sit down and claim your spot
 - **Movement Controls**: WASD/Arrow keys for walking around, mouse look controls
+- **Spooky Outside Adventure**: Leave the theatre at your own risk to find giant temples, treasure, and ghosts
 - **Advanced Rendering**: WebGL rendering with shadow mapping and lighting
 - **Room Sharing**: Generate shareable room URLs to invite friends
 
@@ -55,6 +58,7 @@ A collaborative WebXR movie theatre experience built with Three.js and Socket.IO
 - **🖱️ Mouse**: Look around (click to enable pointer lock)
 - **⌨️ WASD / Arrow Keys**: Move around the theatre
 - **🪑 Click Seats**: Sit down and claim a seat
+- **🚪 Leave the Archway**: Enter the danger zone outside the theatre (temples, ghosts, treasure)
 - **🎬 Start Hosting**: Share your screen with everyone
 - **👤 Upload VRM Avatar**: Upload your own VRM/GLB/GLTF avatar file
 - **🔄 Reset Avatar**: Return to default geometric avatar

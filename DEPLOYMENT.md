@@ -1,11 +1,14 @@
 # Threeatre Deployment Guide
 
+> "Run your watch party, keep the stream alive... but don't you dare leave the theatre unless you're ready for what waits outside."
+
 ## Architecture
 
 Threeatre uses a split deployment architecture:
 - **Frontend**: Vite-built static site deployed to **Vercel**
 - **Backend**: Socket.IO + Express server for real-time multiplayer on **Railway/Render**
 - **Streaming**: WebRTC peer-to-peer (signaled through Socket.IO backend)
+- **Adventure Layer**: Outdoor exploration with temples, treasure chests, ghost AI, and temple safe zones
 
 ## Quick Start
 

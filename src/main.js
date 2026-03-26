@@ -36,6 +36,8 @@ class TheatreApp {
             speed: 8,
             sprintSpeed: 16
         };
+        this.baseWalkSpeed = 8;
+        this.baseSprintSpeed = 16;
         this.raycaster = new THREE.Raycaster();
         this.mouse = new THREE.Vector2();
         this.gravity = -9.8;
@@ -70,6 +72,20 @@ class TheatreApp {
         };
         this.mobileJoystickElements = null;
         this.playerCollisionRadius = 0.45;
+        this.itemBonuses = {
+            speed: 0,
+            power: 0,
+            protection: 0,
+            luck: 0,
+            stealth: 0,
+            flight: false
+        };
+        this._collisionCache = {
+            mode: 'theatre',
+            lastUpdateMs: 0,
+            colliders: []
+        };
+        this._collisionRefreshIntervalMs = 250;
         
         this.init();
         this.setupEventListeners();
@@ -134,6 +150,7 @@ class TheatreApp {
         
         // Setup bindle inventory system
         this.bindle = new Bindle(this.networkManager);
+        this.bindle.setApp(this);
         
         // Connect wearable manager to bindle
         this.bindle.setWearableManager(this.wearableManager);
@@ -410,13 +427,15 @@ class TheatreApp {
         // Always allow tomato throwing - in theatre or outside world
         if (this.theatre.roguelikeWorld.isActive) {
             // In dangerous world, tomatoes can hurt ghosts
-            const fired = this.theatre.roguelikeWorld.fireTomato(origin, direction);
+            const powerMultiplier = 1 + (this.itemBonuses.power * 0.12);
+            const fired = this.theatre.roguelikeWorld.fireTomato(origin, direction, powerMultiplier);
             if (fired) {
                 this.createTomatoThrowEffect();
             }
         } else {
             // In theatre, just throw tomatoes for fun
-            this.throwTheatreTomato(origin, direction);
+            const powerMultiplier = 1 + (this.itemBonuses.power * 0.12);
+            this.throwTheatreTomato(origin, direction, 15 * powerMultiplier, 3 + (this.itemBonuses.power * 0.08));
         }
     }
     
@@ -580,13 +599,14 @@ class TheatreApp {
         
         // Calculate power-based parameters
         const powerMultiplier = 0.5 + (this.tomatoPower * 1.5); // 0.5x to 2x power
-        const speed = 12 * powerMultiplier;
-        const arc = 2 + (this.tomatoPower * 3); // Higher arc for more power
+        const gearPowerMultiplier = 1 + (this.itemBonuses.power * 0.12);
+        const speed = 12 * powerMultiplier * gearPowerMultiplier;
+        const arc = 2 + (this.tomatoPower * 3) + (this.itemBonuses.power * 0.08); // Higher arc for more power
         
         console.log(`🍅 Throwing tomato with ${(this.tomatoPower * 100).toFixed(0)}% power!`);
         
         if (this.theatre.roguelikeWorld.isActive) {
-            this.theatre.roguelikeWorld.fireTomato(origin, direction, powerMultiplier);
+            this.theatre.roguelikeWorld.fireTomato(origin, direction, powerMultiplier * gearPowerMultiplier);
         } else {
             this.throwTheatreTomato(origin, direction, speed, arc);
         }
@@ -1203,7 +1223,7 @@ class TheatreApp {
             }
         }
         
-        newPosition = this.resolveTheatreWallCollisions(this.camera.position, newPosition);
+        newPosition = this.resolveEnvironmentCollisions(this.camera.position, newPosition);
         this.camera.position.copy(newPosition);
         
         if (this.networkManager && (moveVector.length() > 0 || !this.isOnGround)) {
@@ -1226,26 +1246,92 @@ class TheatreApp {
     }
 
     resolveTheatreWallCollisions(currentPosition, proposedPosition) {
-        if (!this.theatre || this.theatre.roguelikeWorld?.isActive) {
-            return proposedPosition;
-        }
-        if (!this.theatre.walls || this.theatre.walls.length === 0) {
-            return proposedPosition;
+        return this.resolveEnvironmentCollisions(currentPosition, proposedPosition);
+    }
+
+    getCollisionCandidates() {
+        const outsideActive = !!this.theatre?.roguelikeWorld?.isActive;
+        if (outsideActive) {
+            const world = this.theatre.roguelikeWorld;
+            const candidates = [];
+            world.worldObjects.forEach((obj) => candidates.push(obj));
+            world.treasureChests.forEach((tc) => candidates.push(tc.mesh));
+            return candidates;
         }
 
+        const candidates = [];
+        this.scene.traverse((obj) => {
+            if (!obj?.isMesh) return;
+            if (obj.name === 'theatre-screen' || obj.name === 'exit-portal') return;
+            if (obj.userData?.userId || obj.userData?.isPlayer) return;
+            if (obj.name && obj.name.includes('avatar')) return;
+            candidates.push(obj);
+        });
+        return candidates;
+    }
+
+    isMeshCollidable(mesh) {
+        if (!mesh?.geometry) return false;
+        if (!mesh.visible) return false;
+        if (mesh.userData?.noCollision) return false;
+
+        const geometryType = mesh.geometry.type || '';
+        if (geometryType.includes('Plane') || geometryType.includes('Ring')) return false;
+
+        if (mesh.material && !Array.isArray(mesh.material)) {
+            if (mesh.material.transparent && (mesh.material.opacity ?? 1) < 0.3) return false;
+        }
+        return true;
+    }
+
+    refreshCollisionCache(force = false) {
+        const now = performance.now();
+        const mode = this.theatre?.roguelikeWorld?.isActive ? 'outside' : 'theatre';
+        const shouldRefresh = force
+            || this._collisionCache.mode !== mode
+            || (now - this._collisionCache.lastUpdateMs) >= this._collisionRefreshIntervalMs;
+        if (!shouldRefresh) {
+            return;
+        }
+
+        const candidates = this.getCollisionCandidates();
+        const colliders = [];
+        for (const candidate of candidates) {
+            if (!candidate) continue;
+            if (candidate.isGroup || candidate.isObject3D) {
+                candidate.traverse((child) => {
+                    if (!child?.isMesh) return;
+                    if (!this.isMeshCollidable(child)) return;
+                    const box = new THREE.Box3().setFromObject(child);
+                    if (box.isEmpty()) return;
+                    const size = new THREE.Vector3();
+                    box.getSize(size);
+                    if (Math.max(size.x, size.z) < 0.45 && size.y < 0.45) return;
+                    colliders.push({ mesh: child, box });
+                });
+                continue;
+            }
+        }
+
+        this._collisionCache = {
+            mode,
+            lastUpdateMs: now,
+            colliders
+        };
+    }
+
+    resolveEnvironmentCollisions(currentPosition, proposedPosition) {
+        this.refreshCollisionCache();
         const radius = this.playerCollisionRadius;
         const y = proposedPosition.y;
 
         const isBlocked = (pos) => {
-            for (const wall of this.theatre.walls) {
-                const box = new THREE.Box3().setFromObject(wall);
-                if (pos.y < box.min.y - 0.2 || pos.y > box.max.y + 0.2) continue;
-
+            for (const { box } of this._collisionCache.colliders) {
+                if (pos.y < box.min.y - 0.25 || pos.y > box.max.y + 0.25) continue;
                 const minX = box.min.x - radius;
                 const maxX = box.max.x + radius;
                 const minZ = box.min.z - radius;
                 const maxZ = box.max.z + radius;
-
                 if (pos.x >= minX && pos.x <= maxX && pos.z >= minZ && pos.z <= maxZ) {
                     return true;
                 }
@@ -1267,6 +1353,20 @@ class TheatreApp {
         }
 
         return resolved;
+    }
+
+    setItemBonuses(bonuses = {}) {
+        this.itemBonuses = {
+            speed: Number(bonuses.speed || 0),
+            power: Number(bonuses.power || 0),
+            protection: Number(bonuses.protection || 0),
+            luck: Number(bonuses.luck || 0),
+            stealth: Number(bonuses.stealth || 0),
+            flight: !!bonuses.flight
+        };
+
+        this.controls.speed = this.baseWalkSpeed + (this.itemBonuses.speed * 0.7);
+        this.controls.sprintSpeed = this.baseSprintSpeed + (this.itemBonuses.speed * 1.2);
     }
     
     animate() {
