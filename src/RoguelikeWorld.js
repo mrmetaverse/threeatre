@@ -26,6 +26,7 @@ export class RoguelikeWorld {
         this.exitPosition = new THREE.Vector3(0, 1.6, 70);
         this.enterTimestamp = 0;
         this.returnCooldownMs = 2500;
+        this.ghostGracePeriodMs = 7000;
 
         this.walls = [];
         this.floors = [];
@@ -399,7 +400,7 @@ export class RoguelikeWorld {
                 baseSpeed: baseSpeed,
                 lastPlayerDistance: Infinity,
                 aggroRange: 160 + Math.random() * 70,
-                killRange: 2.6,
+                killRange: 2.0,
                 health: 2 + Math.floor(Math.random() * 3),
                 alerted: true
             });
@@ -421,7 +422,7 @@ export class RoguelikeWorld {
                 baseSpeed: baseSpeed,
                 lastPlayerDistance: Infinity,
                 aggroRange: 130 + Math.random() * 80,
-                killRange: 2.4,
+                killRange: 2.0,
                 health: 2 + Math.floor(Math.random() * 3),
                 alerted: nearSpawn
             });
@@ -557,15 +558,17 @@ export class RoguelikeWorld {
 
         if (!playerPosition) return;
         const dist = ghost.position.distanceTo(playerPosition);
+        const inGraceWindow = (Date.now() - this.enterTimestamp) < this.ghostGracePeriodMs;
 
-        if (dist < ghost.killRange) { this.killPlayer(); return; }
+        if (!inGraceWindow && dist < ghost.killRange) { this.killPlayer(); return; }
 
         const shouldChase = ghost.alerted || dist < ghost.aggroRange;
 
         if (shouldChase) {
             const dir = new THREE.Vector3().subVectors(playerPosition, ghost.position).normalize();
             const norm = 1 - Math.min(dist, ghost.aggroRange) / ghost.aggroRange;
-            const chaseSpeed = ghost.speed * (1 + norm * 1.2);
+            const graceMultiplier = inGraceWindow ? 0.38 : 1.0;
+            const chaseSpeed = ghost.speed * (1 + norm * 1.2) * graceMultiplier;
             ghost.position.addScaledVector(dir, chaseSpeed * deltaTime);
             ghost.mesh.position.x = ghost.position.x;
             ghost.mesh.position.z = ghost.position.z;
