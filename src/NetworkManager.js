@@ -101,7 +101,8 @@ export class NetworkManager {
                 id: this.userId,
                 name: `User ${this.userId.slice(-4)}`,
                 color: this.generateUserColor(),
-                position: { x: 0, y: 1.6, z: 15 }
+                position: { x: 0, y: 1.6, z: 15 },
+                isPlayer: true
             };
             
             this.addRemoteUser(localUserData);
@@ -141,6 +142,11 @@ export class NetworkManager {
             if (data.userId === this.userId) {
                 if (!result.success) {
                     console.error('Failed to assign your seat:', result.reason);
+                } else if (this.app.omiSeat) {
+                    const seatInfo = this.app.theatre.seats[data.seatIndex];
+                    if (seatInfo) {
+                        this.app.omiSeat.sitInSeat(seatInfo);
+                    }
                 }
             }
         });
@@ -148,6 +154,11 @@ export class NetworkManager {
         this.socket.on('seat-request-denied', (data) => {
             console.log('Seat request denied:', data.reason);
             this.app.showMessage(`Cannot sit there: ${data.reason}`, 'error');
+        });
+
+        this.socket.on('seat-left', (data) => {
+            if (!data?.userId) return;
+            this.app.theatre.clearUserSeat(data.userId);
         });
         
         this.socket.on('host-changed', (hostId) => {

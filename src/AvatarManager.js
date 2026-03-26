@@ -126,6 +126,7 @@ export class AvatarManager {
         vrm.scene.name = `avatar_${userId}`;
         vrm.scene.userData.userId = userId;
         vrm.scene.userData.avatarData = userData;
+        vrm.scene.userData.isPlayer = !!userData?.isPlayer;
         
         // Setup VRM-specific features
         if (vrm.expressionManager) {
@@ -161,6 +162,7 @@ export class AvatarManager {
         avatarGroup.name = `avatar_${userId}`;
         avatarGroup.userData.userId = userId;
         avatarGroup.userData.avatarData = userData;
+        avatarGroup.userData.isPlayer = !!userData?.isPlayer;
         
         // Body
         const bodyGeometry = new THREE.CapsuleGeometry(0.3, 1.2, 4, 8);

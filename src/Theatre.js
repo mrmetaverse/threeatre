@@ -759,6 +759,17 @@ export class Theatre {
             this.users.delete(userId);
         }
     }
+
+    clearUserSeat(userId) {
+        const user = this.users.get(userId);
+        if (!user || user.seatId === null || user.seatId === undefined) return;
+        const seat = this.seats[user.seatId];
+        if (seat) {
+            seat.occupied = false;
+            seat.userId = null;
+        }
+        user.seatId = null;
+    }
     
     updateUserPosition(userId, position, rotation) {
         const user = this.users.get(userId);
@@ -812,7 +823,7 @@ export class Theatre {
         
         // Move avatar to seat
         const seatPosition = seat.position.clone();
-        seatPosition.y += 1.6; // Sitting height
+        seatPosition.y += user.avatarType === 'vrm' ? 0.95 : 1.15;
         
         // Update avatar using avatar manager
         this.avatarManager.updateAvatar(userId, seatPosition);
@@ -876,7 +887,9 @@ export class Theatre {
         this.users.forEach((user, userId) => {
             if (!user.avatar) return;
 
-            if (userId === 'local-player') {
+            const localNetworkUserId = this.networkManager?.userId;
+            if (userId === 'local-player' || (localNetworkUserId && userId === localNetworkUserId)) {
+                user.avatar.visible = false;
                 this.avatarManager.setAvatarActive(userId, false);
                 return;
             }

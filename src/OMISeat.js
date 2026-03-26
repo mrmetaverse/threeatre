@@ -9,6 +9,7 @@ export class OMISeat {
         this.originalCameraState = null;
         this.seatTransition = null;
         this.seatLookTarget = null;
+        this.localAvatarId = null;
     }
     
     sitInSeat(seatInfo) {
@@ -22,7 +23,8 @@ export class OMISeat {
             pitch: this.camera.rotation.x
         };
         
-        const seatPosition = this.calculateSeatCameraPosition(seatInfo);
+        this.localAvatarId = this.theatre?.networkManager?.userId || null;
+        const seatPosition = this.getSeatedCameraAnchor(seatInfo);
         this.seatLookTarget = this.calculateSeatTarget(seatInfo);
         
         this.animateToSeat(seatPosition, this.seatLookTarget);
@@ -39,6 +41,57 @@ export class OMISeat {
         seatPos.y += 1.4;
         seatPos.z += 0.3;
         return seatPos;
+    }
+
+    getLocalAvatarScene() {
+        if (!this.localAvatarId) return null;
+        const user = this.theatre?.users?.get(this.localAvatarId);
+        return user?.avatar || null;
+    }
+
+    getAvatarEyePosition(avatarScene) {
+        const eyePos = new THREE.Vector3();
+        if (!avatarScene) return eyePos;
+
+        let headBone = null;
+        avatarScene.traverse((child) => {
+            if (headBone) return;
+            if (child.isBone && /head/i.test(child.name)) {
+                headBone = child;
+            }
+        });
+
+        if (headBone) {
+            headBone.getWorldPosition(eyePos);
+            eyePos.y += 0.08;
+            return eyePos;
+        }
+
+        const box = new THREE.Box3().setFromObject(avatarScene);
+        if (box.isEmpty()) {
+            eyePos.copy(avatarScene.position);
+            eyePos.y += 1.6;
+            return eyePos;
+        }
+
+        eyePos.set(
+            (box.min.x + box.max.x) * 0.5,
+            box.max.y - 0.05,
+            (box.min.z + box.max.z) * 0.5
+        );
+        return eyePos;
+    }
+
+    getSeatedCameraAnchor(seatInfo) {
+        const avatarScene = this.getLocalAvatarScene();
+        if (!avatarScene) {
+            return this.calculateSeatCameraPosition(seatInfo);
+        }
+
+        const eyePos = this.getAvatarEyePosition(avatarScene);
+        const toScreenDir = new THREE.Vector3(0, 21, -57).sub(eyePos).normalize();
+        eyePos.addScaledVector(toScreenDir, -0.05);
+        return eyePos;
     }
     
     calculateSeatTarget(seatInfo) {
@@ -88,6 +141,7 @@ export class OMISeat {
         }
         
         this.currentSeat = null;
+        this.localAvatarId = null;
         this.hideSeatedFeedback();
         
         return true;
@@ -163,11 +217,24 @@ export class OMISeat {
     
     handleKeyPress(event) {
         if (event.code === 'Escape' && this.isSeated) {
+            const wasSeated = this.isSeated;
             this.standUp();
-            
-            if (this.currentSeat && this.theatre.networkManager) {
+
+            if (wasSeated && this.theatre.networkManager) {
                 this.theatre.networkManager.leaveSeat();
             }
+        }
+    }
+
+    update() {
+        if (!this.isSeated) return;
+        const avatarScene = this.getLocalAvatarScene();
+        if (!avatarScene) return;
+
+        const eyePos = this.getAvatarEyePosition(avatarScene);
+        this.camera.position.copy(eyePos);
+        if (this.seatLookTarget) {
+            this.camera.lookAt(this.seatLookTarget);
         }
     }
     

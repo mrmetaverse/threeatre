@@ -151,7 +151,6 @@ class TheatreApp {
         
         this.applyCameraRotation();
         
-        this.createPlayerAvatar();
         this.setupMobileControls();
     }
     
@@ -1113,10 +1112,8 @@ class TheatreApp {
                 // Check if seat is available
                 const seatInfo = this.theatre.seats[seatIndex];
                 if (seatInfo && !seatInfo.occupied) {
-                    // Use OMI_seat to sit down locally first
-                    this.omiSeat.sitInSeat(seatInfo);
-                    
-                    // Then request seat from server
+                    // Request seat from server first. We only seat locally
+                    // after receiving authoritative seat assignment.
                     if (this.networkManager) {
                         this.networkManager.requestSeat(seatIndex);
                     }
@@ -1218,6 +1215,9 @@ class TheatreApp {
         const deltaTime = 0.016; // Approximate 60fps
         
         this.updateMovement(deltaTime);
+        if (this.omiSeat) {
+            this.omiSeat.update();
+        }
         this.theatre.update();
         
         // Update wearables animation
