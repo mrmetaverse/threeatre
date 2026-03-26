@@ -58,6 +58,7 @@ export class RoguelikeWorld {
             ghosts: this.ghosts.length
         });
         this.showWorldDebugOverlay();
+        this.showOutsideStateOverlay();
     }
 
     buildGround() {
@@ -149,8 +150,8 @@ export class RoguelikeWorld {
 
     buildNearSpawnLandmarks() {
         // Guaranteed visible objectives close to spawn so the world never feels blank.
-        const center = new THREE.Vector3(0, 0, 92);
-        const ringRadius = 14;
+        const center = new THREE.Vector3(0, 0, 88);
+        const ringRadius = 9;
         for (let i = 0; i < 4; i++) {
             const angle = (i / 4) * Math.PI * 2;
             const x = center.x + Math.cos(angle) * ringRadius;
@@ -170,6 +171,18 @@ export class RoguelikeWorld {
             this.scene.add(torch);
             this.worldLights.push(torch);
         }
+
+        // Emergency guaranteed-visible markers right around spawn.
+        const markerMat = new THREE.MeshBasicMaterial({ color: 0xff3355 });
+        const markerA = new THREE.Mesh(new THREE.BoxGeometry(1.4, 4, 1.4), markerMat);
+        markerA.position.set(0, 2, 82);
+        this.scene.add(markerA);
+        this.worldObjects.push(markerA);
+
+        const markerB = new THREE.Mesh(new THREE.BoxGeometry(1.4, 4, 1.4), markerMat);
+        markerB.position.set(0, 2, 94);
+        this.scene.add(markerB);
+        this.worldObjects.push(markerB);
     }
 
     buildTemple(cfg) {
@@ -817,6 +830,16 @@ export class RoguelikeWorld {
         setTimeout(() => d.remove(), 8000);
     }
 
+    showOutsideStateOverlay() {
+        const existing = document.getElementById('outside-state-overlay');
+        if (existing) existing.remove();
+        const d = document.createElement('div');
+        d.id = 'outside-state-overlay';
+        d.style.cssText = 'position:fixed;top:14px;left:50%;transform:translateX(-50%);background:rgba(120,20,20,0.85);color:#fff;border:2px solid #ff6666;border-radius:10px;padding:8px 14px;font-size:13px;z-index:1300;';
+        d.textContent = `OUTSIDE ACTIVE | temples:${this.temples.length} ghosts:${this.ghosts.length}`;
+        document.body.appendChild(d);
+    }
+
     hideTheatre() {
         // Hide all current theatre renderables/lights except avatar objects.
         this.hiddenTheatreObjects = [];
@@ -842,6 +865,8 @@ export class RoguelikeWorld {
         this.ghosts.forEach(g => { g.mesh.visible = false; this.scene.remove(g.mesh); });
         this.treasureChests.forEach(tc => { tc.mesh.visible = false; this.scene.remove(tc.mesh); });
         this.worldLights.forEach(l => this.scene.remove(l));
+        const outside = document.getElementById('outside-state-overlay');
+        if (outside) outside.remove();
 
         if (this.savedBg) this.scene.background = this.savedBg;
         else this.scene.background = new THREE.Color(0x000011);
