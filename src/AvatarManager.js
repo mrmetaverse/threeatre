@@ -7,6 +7,7 @@ export class AvatarManager {
         this.scene = scene;
         this.gltfLoader = new GLTFLoader();
         this.avatars = new Map();
+        this.avatarActivity = new Map();
         this.defaultAvatarUrl = '/assets/MisfitPixels600.vrm'; // Use MisfitPixels VRM
         
         // Setup VRM loader plugin
@@ -104,6 +105,7 @@ export class AvatarManager {
                         animations: gltf.animations || [],
                         mixer: new THREE.AnimationMixer(vrm.scene)
                     });
+                    this.avatarActivity.set(userId, true);
                     
                     console.log(`VRM avatar loaded for user ${userId}`);
                     resolve(vrm);
@@ -203,6 +205,7 @@ export class AvatarManager {
             animations: [],
             mixer: null
         });
+        this.avatarActivity.set(userId, true);
         
         console.log(`Simple avatar created for user ${userId}`);
         return { scene: avatarGroup };
@@ -586,7 +589,14 @@ export class AvatarManager {
         });
         
         this.avatars.delete(userId);
+        this.avatarActivity.delete(userId);
         console.log(`Avatar removed for user ${userId}`);
+    }
+
+    setAvatarActive(userId, isActive) {
+        if (this.avatars.has(userId)) {
+            this.avatarActivity.set(userId, isActive);
+        }
     }
     
     async uploadVRMAvatar(file, userId) {
@@ -633,6 +643,8 @@ export class AvatarManager {
     update(deltaTime) {
         // Update all avatars
         this.avatars.forEach((avatar, userId) => {
+            if (this.avatarActivity.get(userId) === false) return;
+
             if (avatar.type === 'vrm' && avatar.vrm) {
                 avatar.vrm.update(deltaTime);
             }

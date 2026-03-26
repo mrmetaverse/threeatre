@@ -22,6 +22,11 @@ export class Theatre {
         this._streamCtx = null;
         this._streamFrameIntervalMs = 1000 / 20;
         this._lastStreamFrameMs = 0;
+        this._cullFrustum = new THREE.Frustum();
+        this._cullProjScreen = new THREE.Matrix4();
+        this._avatarCullDistance = 140;
+        this._lastCullUpdateMs = 0;
+        this._cullUpdateIntervalMs = 150;
         
         this.init();
     }
@@ -831,12 +836,18 @@ export class Theatre {
                 this._lastStreamFrameMs = now;
             }
         }
+
+        const playerPosition = this.camera ? this.camera.position : null;
+        const now = performance.now();
+        if (playerPosition && (now - this._lastCullUpdateMs) >= this._cullUpdateIntervalMs) {
+            this.updateAvatarCulling(playerPosition);
+            this._lastCullUpdateMs = now;
+        }
         
         // Update avatar manager
         this.avatarManager.update(deltaTime);
         
         // Update roguelike world
-        const playerPosition = this.camera ? this.camera.position : null;
         this.roguelikeWorld.update(deltaTime, playerPosition);
         
         // Check for exit/return collisions
@@ -846,12 +857,37 @@ export class Theatre {
         
         // Update user avatars with simple idle animation
         this.users.forEach(user => {
-            if (user.avatarType === 'simple') {
+            if (user.avatarType === 'simple' && user.avatar?.visible) {
                 // Simple idle animation - slight bobbing for simple avatars
                 const time = Date.now() * 0.001;
                 const originalY = user.position.y;
                 user.avatar.position.y = originalY + Math.sin(time + user.id.length) * 0.02;
             }
+        });
+    }
+
+    updateAvatarCulling(playerPosition) {
+        if (!this.camera) return;
+
+        this.camera.updateMatrixWorld();
+        this._cullProjScreen.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
+        this._cullFrustum.setFromProjectionMatrix(this._cullProjScreen);
+
+        this.users.forEach((user, userId) => {
+            if (!user.avatar) return;
+
+            if (userId === 'local-player') {
+                this.avatarManager.setAvatarActive(userId, false);
+                return;
+            }
+
+            const distance = playerPosition.distanceTo(user.avatar.position);
+            const inRange = distance <= this._avatarCullDistance;
+            const inFrustum = this._cullFrustum.intersectsObject(user.avatar);
+            const isVisible = inRange && inFrustum;
+
+            user.avatar.visible = isVisible;
+            this.avatarManager.setAvatarActive(userId, isVisible);
         });
     }
     
