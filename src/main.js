@@ -1094,7 +1094,8 @@ class TheatreApp {
             if (allChests.length > 0) {
                 const treasureIntersects = this.raycaster.intersectObjects(allChests, true);
                 if (treasureIntersects.length > 0) {
-                    const opened = this.theatre.roguelikeWorld.openTreasureChest();
+                    const clickedObject = treasureIntersects[0].object;
+                    const opened = this.theatre.roguelikeWorld.openTreasureChest(clickedObject, this.camera.position);
                     if (opened) return;
                 }
             }

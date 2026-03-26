@@ -140,10 +140,10 @@ export class RoguelikeWorld {
 
     buildTemples() {
         const templeConfigs = [
-            { pos: new THREE.Vector3(-95, 0, 150), color: 0xff6600, name: 'Ember Shrine', beaconColor: 0xff4400, dist: 'far' },
-            { pos: new THREE.Vector3(110, 0, 185), color: 0x44aaff, name: 'Frost Sanctum', beaconColor: 0x2288ff, dist: 'far' },
-            { pos: new THREE.Vector3(-125, 0, 250), color: 0xaa44ff, name: 'Void Temple', beaconColor: 0x8822ff, dist: 'far' },
-            { pos: new THREE.Vector3(105, 0, 295), color: 0xffdd00, name: 'Golden Ziggurat', beaconColor: 0xffaa00, dist: 'far' },
+            { pos: new THREE.Vector3(-165, 0, 185), color: 0xff6600, name: 'Ember Shrine', beaconColor: 0xff4400, dist: 'grand' },
+            { pos: new THREE.Vector3(175, 0, 235), color: 0x44aaff, name: 'Frost Sanctum', beaconColor: 0x2288ff, dist: 'grand' },
+            { pos: new THREE.Vector3(-185, 0, 330), color: 0xaa44ff, name: 'Void Temple', beaconColor: 0x8822ff, dist: 'grand' },
+            { pos: new THREE.Vector3(165, 0, 390), color: 0xffdd00, name: 'Golden Ziggurat', beaconColor: 0xffaa00, dist: 'grand' },
         ];
 
         templeConfigs.forEach(cfg => {
@@ -192,19 +192,20 @@ export class RoguelikeWorld {
         const { pos, color, name, beaconColor, dist } = cfg;
         const group = new THREE.Group();
         group.position.copy(pos);
+        const isGrand = dist === 'grand';
 
-        const islandGeo = new THREE.CylinderGeometry(12, 16, 2, 24);
+        const islandGeo = new THREE.CylinderGeometry(isGrand ? 22 : 12, isGrand ? 30 : 16, isGrand ? 3 : 2, 28);
         const islandMat = new THREE.MeshLambertMaterial({ color: 0x2a2a20 });
         const island = new THREE.Mesh(islandGeo, islandMat);
-        island.position.y = -1;
+        island.position.y = isGrand ? -1.5 : -1;
         island.castShadow = true;
         island.receiveShadow = true;
         group.add(island);
 
-        const stepsCount = 4;
+        const stepsCount = isGrand ? 7 : 4;
         for (let i = 0; i < stepsCount; i++) {
-            const r = 8 - i * 1.5;
-            const h = 0.6;
+            const r = (isGrand ? 15 : 8) - i * (isGrand ? 1.6 : 1.5);
+            const h = isGrand ? 0.95 : 0.6;
             const stepGeo = new THREE.CylinderGeometry(r, r + 0.3, h, 16);
             const stepMat = new THREE.MeshLambertMaterial({ color: 0x444438 });
             const step = new THREE.Mesh(stepGeo, stepMat);
@@ -213,46 +214,47 @@ export class RoguelikeWorld {
             group.add(step);
         }
 
-        const pillarCount = dist === 'far' ? 8 : 6;
-        const pillarRadius = dist === 'far' ? 6 : 5;
-        const pillarHeight = dist === 'far' ? 10 : 7;
+        const pillarCount = isGrand ? 14 : (dist === 'far' ? 8 : 6);
+        const pillarRadius = isGrand ? 13 : (dist === 'far' ? 6 : 5);
+        const pillarHeight = isGrand ? 18 : (dist === 'far' ? 10 : 7);
         for (let i = 0; i < pillarCount; i++) {
             const angle = (i / pillarCount) * Math.PI * 2;
-            const pGeo = new THREE.CylinderGeometry(0.4, 0.5, pillarHeight, 8);
+            const pGeo = new THREE.CylinderGeometry(isGrand ? 0.75 : 0.4, isGrand ? 1.0 : 0.5, pillarHeight, 10);
             const pMat = new THREE.MeshLambertMaterial({ color: 0x555550 });
             const pillar = new THREE.Mesh(pGeo, pMat);
-            pillar.position.set(Math.cos(angle) * pillarRadius, pillarHeight / 2 + stepsCount * 0.6 - 0.6, Math.sin(angle) * pillarRadius);
+            const stepHeight = isGrand ? 0.95 : 0.6;
+            pillar.position.set(Math.cos(angle) * pillarRadius, pillarHeight / 2 + stepsCount * stepHeight - stepHeight, Math.sin(angle) * pillarRadius);
             pillar.castShadow = true;
             group.add(pillar);
         }
 
-        const altarGeo = new THREE.BoxGeometry(2.5, 1.5, 2.5);
+        const altarGeo = new THREE.BoxGeometry(isGrand ? 5.2 : 2.5, isGrand ? 2.8 : 1.5, isGrand ? 5.2 : 2.5);
         const altarMat = new THREE.MeshLambertMaterial({ color: 0x3a3a32 });
         const altar = new THREE.Mesh(altarGeo, altarMat);
-        altar.position.y = stepsCount * 0.6 + 0.75;
+        altar.position.y = stepsCount * (isGrand ? 0.95 : 0.6) + (isGrand ? 1.4 : 0.75);
         altar.castShadow = true;
         group.add(altar);
 
-        const orbGeo = new THREE.SphereGeometry(0.6, 16, 12);
+        const orbGeo = new THREE.SphereGeometry(isGrand ? 1.2 : 0.6, 16, 12);
         const orbMat = new THREE.MeshBasicMaterial({ color: color, transparent: true, opacity: 0.9 });
         const orb = new THREE.Mesh(orbGeo, orbMat);
-        orb.position.y = stepsCount * 0.6 + 2.2;
+        orb.position.y = stepsCount * (isGrand ? 0.95 : 0.6) + (isGrand ? 4.2 : 2.2);
         group.add(orb);
 
-        const beaconLight = new THREE.PointLight(beaconColor, 3, 80);
-        beaconLight.position.y = stepsCount * 0.6 + 4;
+        const beaconLight = new THREE.PointLight(beaconColor, isGrand ? 6 : 3, isGrand ? 150 : 80);
+        beaconLight.position.y = stepsCount * (isGrand ? 0.95 : 0.6) + (isGrand ? 8 : 4);
         group.add(beaconLight);
         this.worldLights.push(beaconLight);
 
-        const pillarLight = new THREE.PointLight(color, 1.5, 25);
+        const pillarLight = new THREE.PointLight(color, isGrand ? 2.7 : 1.5, isGrand ? 55 : 25);
         pillarLight.position.y = 2;
         group.add(pillarLight);
         this.worldLights.push(pillarLight);
 
-        const beamGeo = new THREE.CylinderGeometry(0.1, 0.8, 30, 8, 1, true);
+        const beamGeo = new THREE.CylinderGeometry(isGrand ? 0.35 : 0.1, isGrand ? 1.8 : 0.8, isGrand ? 52 : 30, 8, 1, true);
         const beamMat = new THREE.MeshBasicMaterial({ color: beaconColor, transparent: true, opacity: 0.08, side: THREE.DoubleSide });
         const beam = new THREE.Mesh(beamGeo, beamMat);
-        beam.position.y = stepsCount * 0.6 + 17;
+        beam.position.y = stepsCount * (isGrand ? 0.95 : 0.6) + (isGrand ? 30 : 17);
         group.add(beam);
 
         // Temple safe zone ring: entering this area protects player from ghost kills.
@@ -273,7 +275,7 @@ export class RoguelikeWorld {
         this.worldObjects.push(group);
 
         const chestPos = pos.clone();
-        chestPos.y = stepsCount * 0.6 + 1.5;
+        chestPos.y = stepsCount * (isGrand ? 0.95 : 0.6) + (isGrand ? 2.6 : 1.5);
         const chest = this.createTreasureChest(chestPos);
         this.scene.add(chest);
         this.treasureChests.push({ mesh: chest, position: chestPos, opened: false });
@@ -652,9 +654,9 @@ export class RoguelikeWorld {
         this.treasureChests.forEach(tc => {
             if (tc.opened) return;
             const dist = playerPosition.distanceTo(tc.position);
-            if (dist < 5 && !document.getElementById('treasure-prompt')) this.showTreasurePrompt();
-            else if (dist >= 5) this.hideTreasurePrompt();
-            tc.mesh.userData.canInteract = dist < 3;
+            if (dist < 9 && !document.getElementById('treasure-prompt')) this.showTreasurePrompt();
+            else if (dist >= 9) this.hideTreasurePrompt();
+            tc.mesh.userData.canInteract = dist < 7;
         });
     }
 
@@ -706,9 +708,28 @@ export class RoguelikeWorld {
         return g;
     }
 
-    openTreasureChest() {
-        const tc = this.treasureChests.find(t => !t.opened && t.mesh.userData.canInteract);
+    findTreasureByObject(clickedObject) {
+        if (!clickedObject) return null;
+        return this.treasureChests.find((tc) => {
+            if (tc.opened) return false;
+            let obj = clickedObject;
+            while (obj) {
+                if (obj === tc.mesh) return true;
+                obj = obj.parent;
+            }
+            return false;
+        }) || null;
+    }
+
+    openTreasureChest(clickedObject = null, playerPosition = null) {
+        let tc = this.findTreasureByObject(clickedObject);
+        if (!tc) {
+            tc = this.treasureChests.find(t => !t.opened && t.mesh.userData.canInteract);
+        }
         if (!tc) return false;
+        if (playerPosition && playerPosition.distanceTo(tc.position) > 8) {
+            return false;
+        }
         tc.opened = true;
         this.playerScore += 1;
         this.updateScoreDisplay();
