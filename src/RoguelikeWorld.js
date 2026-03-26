@@ -44,6 +44,8 @@ export class RoguelikeWorld {
         this._outsideCullProjScreen = new THREE.Matrix4();
         this._lastOutsideCullMs = 0;
         this._outsideCullIntervalMs = 150;
+        this.spookyAudioEmitters = [];
+        this._spookyAudioReady = false;
 
         this.walls = [];
         this.floors = [];
@@ -68,6 +70,7 @@ export class RoguelikeWorld {
         this.scatterSpookyDecor();
         this.spawnGhosts();
         this.setupWorldLighting();
+        this.setupSpookySpatialAudio();
 
         this.isActive = true;
         console.log('[RoguelikeWorld] Active:', {
@@ -694,6 +697,203 @@ export class RoguelikeWorld {
         moonGlow.position.copy(moon.position);
         this.scene.add(moonGlow);
         this.worldObjects.push(moonGlow);
+    }
+
+    createNoiseBuffer(audioContext, durationSeconds = 8, gain = 0.2) {
+        const sampleRate = audioContext.sampleRate;
+        const length = Math.floor(sampleRate * durationSeconds);
+        const buffer = audioContext.createBuffer(1, length, sampleRate);
+        const data = buffer.getChannelData(0);
+        let previous = 0;
+        for (let i = 0; i < length; i++) {
+            const white = (Math.random() * 2 - 1);
+            previous = (previous * 0.98) + (white * 0.02);
+            data[i] = previous * gain;
+        }
+        return buffer;
+    }
+
+    createCricketBuffer(audioContext, durationSeconds = 6) {
+        const sampleRate = audioContext.sampleRate;
+        const length = Math.floor(sampleRate * durationSeconds);
+        const buffer = audioContext.createBuffer(1, length, sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < length; i++) {
+            const t = i / sampleRate;
+            const burst = ((Math.sin(t * Math.PI * 2 * 3.6) + 1) * 0.5) ** 8;
+            const carrier = Math.sin(t * Math.PI * 2 * 5200);
+            const flutter = Math.sin(t * Math.PI * 2 * 48);
+            data[i] = carrier * burst * (0.05 + flutter * 0.01);
+        }
+        return buffer;
+    }
+
+    createOwlBuffer(audioContext, durationSeconds = 10) {
+        const sampleRate = audioContext.sampleRate;
+        const length = Math.floor(sampleRate * durationSeconds);
+        const buffer = audioContext.createBuffer(1, length, sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < length; i++) {
+            const t = i / sampleRate;
+            const phase = t % 5;
+            let v = 0;
+            if (phase < 1.8) {
+                const env = Math.max(0, 1 - (phase / 1.8));
+                const freq = 420 - (phase * 80);
+                v = Math.sin(t * Math.PI * 2 * freq) * env * 0.14;
+            }
+            data[i] = v;
+        }
+        return buffer;
+    }
+
+    createSpatialEmitter(position, options = {}) {
+        const listener = this.theatre?.avatarManager?.audioListener;
+        const audioContext = this.theatre?.avatarManager?.audioContext;
+        if (!listener || !audioContext) return null;
+
+        const anchor = new THREE.Object3D();
+        anchor.position.copy(position);
+        anchor.userData.noCollision = true;
+        this.scene.add(anchor);
+        this.worldObjects.push(anchor);
+
+        const audio = new THREE.PositionalAudio(listener);
+        const refDistance = options.refDistance ?? 45;
+        const maxDistance = options.maxDistance ?? 260;
+        const rolloffFactor = options.rolloffFactor ?? 1.2;
+        audio.setRefDistance(refDistance);
+        audio.setMaxDistance(maxDistance);
+        audio.setRolloffFactor(rolloffFactor);
+        audio.setDistanceModel('exponential');
+        audio.setLoop(options.loop !== false);
+        audio.setVolume(options.volume ?? 0.35);
+        if (options.cone) {
+            audio.setDirectionalCone(options.cone.inner, options.cone.outer, options.cone.gain);
+        }
+
+        const type = options.type || 'noise';
+        let buffer = null;
+        if (type === 'cricket') buffer = this.createCricketBuffer(audioContext, options.duration ?? 6);
+        else if (type === 'owl') buffer = this.createOwlBuffer(audioContext, options.duration ?? 10);
+        else buffer = this.createNoiseBuffer(audioContext, options.duration ?? 8, options.noiseGain ?? 0.2);
+
+        audio.setBuffer(buffer);
+        anchor.add(audio);
+
+        const emitter = { anchor, audio, options };
+        this.spookyAudioEmitters.push(emitter);
+        return emitter;
+    }
+
+    ensureSpookyAudioStarted() {
+        if (this._spookyAudioReady) return;
+        const audioContext = this.theatre?.avatarManager?.audioContext;
+        if (!audioContext) return;
+
+        const startAll = () => {
+            if (audioContext.state === 'suspended') {
+                audioContext.resume().catch(() => {});
+            }
+            this.spookyAudioEmitters.forEach((emitter) => {
+                if (!emitter.audio.isPlaying) {
+                    try { emitter.audio.play(); } catch (e) { /* empty */ }
+                }
+            });
+            this._spookyAudioReady = true;
+        };
+
+        if (audioContext.state === 'running') {
+            startAll();
+            return;
+        }
+
+        const onceStart = () => {
+            startAll();
+            document.removeEventListener('click', onceStart);
+            document.removeEventListener('keydown', onceStart);
+            document.removeEventListener('touchstart', onceStart);
+        };
+        document.addEventListener('click', onceStart);
+        document.addEventListener('keydown', onceStart);
+        document.addEventListener('touchstart', onceStart);
+    }
+
+    setupSpookySpatialAudio() {
+        this.clearSpookySpatialAudio();
+
+        const spawn = this.theatre?.camera?.position?.clone() || new THREE.Vector3(0, 1.6, 88);
+        const templeHints = this.temples.slice(0, 4);
+
+        // Wide ambient wind beds
+        this.createSpatialEmitter(new THREE.Vector3(spawn.x - 120, 14, spawn.z + 120), {
+            type: 'wind',
+            duration: 9,
+            noiseGain: 0.15,
+            volume: 0.35,
+            refDistance: 80,
+            maxDistance: 500,
+            rolloffFactor: 0.9
+        });
+        this.createSpatialEmitter(new THREE.Vector3(spawn.x + 140, 20, spawn.z + 220), {
+            type: 'wind',
+            duration: 11,
+            noiseGain: 0.13,
+            volume: 0.3,
+            refDistance: 95,
+            maxDistance: 540,
+            rolloffFactor: 0.85
+        });
+
+        // Localized cricket beds near floor/brush
+        for (let i = 0; i < 6; i++) {
+            const angle = (i / 6) * Math.PI * 2;
+            const radius = 90 + (i % 3) * 26;
+            const pos = new THREE.Vector3(
+                spawn.x + Math.cos(angle) * radius,
+                1.4 + (i % 2) * 0.6,
+                spawn.z + Math.sin(angle) * radius + 70
+            );
+            this.createSpatialEmitter(pos, {
+                type: 'cricket',
+                duration: 6.2,
+                volume: 0.44,
+                refDistance: 28,
+                maxDistance: 210,
+                rolloffFactor: 1.3
+            });
+        }
+
+        // Sparse owl hoots from high positions.
+        templeHints.forEach((temple, idx) => {
+            const pos = temple.position.clone();
+            pos.y = 18 + (idx % 2) * 6;
+            pos.x += (idx % 2 === 0 ? 16 : -18);
+            pos.z += (idx % 2 === 0 ? -12 : 14);
+            this.createSpatialEmitter(pos, {
+                type: 'owl',
+                duration: 10,
+                volume: 0.28,
+                refDistance: 70,
+                maxDistance: 460,
+                rolloffFactor: 0.9
+            });
+        });
+
+        this.ensureSpookyAudioStarted();
+    }
+
+    clearSpookySpatialAudio() {
+        this.spookyAudioEmitters.forEach((emitter) => {
+            if (emitter.audio?.isPlaying) {
+                emitter.audio.stop();
+            }
+            if (emitter.anchor?.parent) {
+                emitter.anchor.parent.remove(emitter.anchor);
+            }
+        });
+        this.spookyAudioEmitters = [];
+        this._spookyAudioReady = false;
     }
 
     spawnGhosts() {
@@ -1366,6 +1566,7 @@ export class RoguelikeWorld {
     }
 
     hideWorld() {
+        this.clearSpookySpatialAudio();
         this.worldObjects.forEach(o => { if (o.visible !== undefined) o.visible = false; this.scene.remove(o); });
         this.ghosts.forEach(g => { g.mesh.visible = false; this.scene.remove(g.mesh); });
         this.treasureChests.forEach(tc => { tc.mesh.visible = false; this.scene.remove(tc.mesh); });
@@ -1383,6 +1584,7 @@ export class RoguelikeWorld {
     }
 
     clearWorld() {
+        this.clearSpookySpatialAudio();
         const dispose = (obj) => {
             this.scene.remove(obj);
             if (obj.traverse) obj.traverse(c => { if (c.geometry) c.geometry.dispose(); if (c.material) c.material.dispose(); });
