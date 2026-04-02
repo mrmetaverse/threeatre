@@ -1365,10 +1365,14 @@ class TheatreApp {
         this.refreshCollisionCache();
         const radius = this.playerCollisionRadius;
         const y = proposedPosition.y;
+        const playerFootOffset = 1.6;
+        const playerHeadOffset = 0.2;
 
         const isBlocked = (pos) => {
             for (const { box } of this._collisionCache.colliders) {
-                if (pos.y < box.min.y - 0.25 || pos.y > box.max.y + 0.25) continue;
+                const footY = pos.y - playerFootOffset;
+                const headY = pos.y + playerHeadOffset;
+                if (headY < box.min.y || footY > box.max.y) continue;
                 const minX = box.min.x - radius;
                 const maxX = box.max.x + radius;
                 const minZ = box.min.z - radius;
@@ -1383,14 +1387,30 @@ class TheatreApp {
         const resolved = currentPosition.clone();
         resolved.y = y;
 
-        const xStep = new THREE.Vector3(proposedPosition.x, y, currentPosition.z);
-        if (!isBlocked(xStep)) {
-            resolved.x = proposedPosition.x;
-        }
+        // Sweep movement in short increments to prevent clipping through thin walls.
+        const travel = new THREE.Vector3(
+            proposedPosition.x - currentPosition.x,
+            0,
+            proposedPosition.z - currentPosition.z
+        );
+        const travelDistance = Math.hypot(travel.x, travel.z);
+        const maxStepDistance = Math.max(0.12, radius * 0.5);
+        const steps = Math.max(1, Math.ceil(travelDistance / maxStepDistance));
 
-        const zStep = new THREE.Vector3(resolved.x, y, proposedPosition.z);
-        if (!isBlocked(zStep)) {
-            resolved.z = proposedPosition.z;
+        for (let i = 1; i <= steps; i++) {
+            const t = i / steps;
+            const targetX = currentPosition.x + travel.x * t;
+            const targetZ = currentPosition.z + travel.z * t;
+
+            const xStep = new THREE.Vector3(targetX, y, resolved.z);
+            if (!isBlocked(xStep)) {
+                resolved.x = targetX;
+            }
+
+            const zStep = new THREE.Vector3(resolved.x, y, targetZ);
+            if (!isBlocked(zStep)) {
+                resolved.z = targetZ;
+            }
         }
 
         return resolved;

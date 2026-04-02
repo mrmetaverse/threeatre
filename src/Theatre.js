@@ -29,6 +29,8 @@ export class Theatre {
         this._lastCullUpdateMs = 0;
         this._cullUpdateIntervalMs = 150;
         this._lastTransitionCheckPosition = null;
+        this._lastWorldTransitionAt = 0;
+        this._worldTransitionCooldownMs = 450;
         this.theatreSpeakerAnchors = [];
         this.theatreSpeakerAudioNodes = [];
         this._theatreSpeakerAudioUnlocked = false;
@@ -1094,29 +1096,46 @@ export class Theatre {
     
     checkWorldTransitions(playerPosition) {
         if (!this.exitPortal || !playerPosition) return;
+        const now = performance.now();
         const portalPos = this.exitPortal.position;
         const lastPos = this._lastTransitionCheckPosition || playerPosition.clone();
 
-        const doorwayHalfWidth = 12.5;
-        const doorwayMaxHeight = 24;
-        const nearDoorwayNow = Math.abs(playerPosition.x - portalPos.x) <= doorwayHalfWidth && playerPosition.y <= doorwayMaxHeight;
-        const nearDoorwayLast = Math.abs(lastPos.x - portalPos.x) <= doorwayHalfWidth && lastPos.y <= doorwayMaxHeight;
+        const inDoorLane = (pos) => {
+            if (!pos) return false;
+            if (pos.y > 24) return false;
+            const relX = pos.x - portalPos.x;
+            const inLeftOpening = relX >= -17.5 && relX <= -2.0;
+            const inRightOpening = relX >= 2.0 && relX <= 17.5;
+            const inWideArchFallback = Math.abs(relX) <= 17.5;
+            return inLeftOpening || inRightOpening || inWideArchFallback;
+        };
+
+        const nearDoorwayNow = inDoorLane(playerPosition);
+        const nearDoorwayLast = inDoorLane(lastPos);
         const nearDoorway = nearDoorwayNow || nearDoorwayLast;
 
         const crossedOutward =
             nearDoorway
             && lastPos.z <= (portalPos.z + 0.8)
-            && playerPosition.z > (portalPos.z + 2.2);
+            && playerPosition.z >= (portalPos.z + 1.6);
 
         const crossedInward =
             nearDoorway
             && lastPos.z >= (portalPos.z - 0.8)
-            && playerPosition.z < (portalPos.z - 1.2);
+            && playerPosition.z <= (portalPos.z - 1.0);
 
-        if (!this.roguelikeWorld.isActive && crossedOutward) {
+        // Fallback overlap checks: transition still works if the player lingers
+        // near the doorway and misses the exact crossing frame.
+        const settledOutside = nearDoorwayNow && playerPosition.z >= (portalPos.z + 1.8);
+        const settledInside = nearDoorwayNow && playerPosition.z <= (portalPos.z - 1.0);
+        const canTransition = (now - this._lastWorldTransitionAt) > this._worldTransitionCooldownMs;
+
+        if (!this.roguelikeWorld.isActive && canTransition && (crossedOutward || settledOutside)) {
             this.roguelikeWorld.enterWorld(playerPosition);
-        } else if (this.roguelikeWorld.isActive && crossedInward) {
+            this._lastWorldTransitionAt = now;
+        } else if (this.roguelikeWorld.isActive && canTransition && (crossedInward || settledInside)) {
             this.roguelikeWorld.hideWorld();
+            this._lastWorldTransitionAt = now;
         }
 
         this._lastTransitionCheckPosition = playerPosition.clone();
