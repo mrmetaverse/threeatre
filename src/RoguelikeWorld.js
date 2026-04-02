@@ -45,7 +45,11 @@ export class RoguelikeWorld {
         this._outsideCullFrustum = new THREE.Frustum();
         this._outsideCullProjScreen = new THREE.Matrix4();
         this._lastOutsideCullMs = 0;
-        this._outsideCullIntervalMs = 220;
+        this._outsideCullIntervalMs = 420;
+        this._lastAtmosphereTickMs = 0;
+        this._atmosphereTickIntervalMs = 120;
+        this._lastGroundTileCoord = null;
+        this._lastTempleCellCoord = null;
         this.spookyAudioEmitters = [];
         this._spookyAudioReady = false;
         this.walkableSurfaces = [];
@@ -176,7 +180,7 @@ export class RoguelikeWorld {
 
     createGroundTile(tileX, tileZ) {
         const geo = new THREE.PlaneGeometry(this.groundTileSize, this.groundTileSize);
-        const mat = new THREE.MeshLambertMaterial({ map: this.groundTexture, side: THREE.DoubleSide });
+        const mat = new THREE.MeshLambertMaterial({ map: this.groundTexture, side: THREE.FrontSide });
         const tile = new THREE.Mesh(geo, mat);
         tile.rotation.x = -Math.PI / 2;
         tile.position.set(tileX * this.groundTileSize, -0.05, tileZ * this.groundTileSize);
@@ -220,10 +224,12 @@ export class RoguelikeWorld {
             this.worldObjects = this.worldObjects.filter((obj) => obj !== tile);
             this.groundTiles.delete(key);
         });
+
+        this._lastGroundTileCoord = `${tileX}:${tileZ}`;
     }
 
     buildAtmosphere() {
-        const particleCount = 140;
+        const particleCount = 96;
         const positions = new Float32Array(particleCount * 3);
         for (let i = 0; i < particleCount; i++) {
             positions[i * 3] = (Math.random() - 0.5) * 400;
@@ -245,7 +251,7 @@ export class RoguelikeWorld {
         this.worldObjects.push(fogParticles);
 
         const starsGeo = new THREE.BufferGeometry();
-        const starCount = 900;
+        const starCount = 640;
         const starPositions = new Float32Array(starCount * 3);
         for (let i = 0; i < starCount; i++) {
             const angle = Math.random() * Math.PI * 2;
@@ -1077,6 +1083,7 @@ export class RoguelikeWorld {
         if (!this.isActive) return;
 
         const time = Date.now() * 0.001;
+        const now = performance.now();
         const dt = Math.min(0.05, Math.max(0.008, deltaTime || 0.016));
 
         // Pack alert: once one ghost spots the player, nearby ghosts aggro too.
@@ -1104,8 +1111,7 @@ export class RoguelikeWorld {
         if (playerPosition) {
             this.checkMultipleTreasures(playerPosition);
             this.checkLandmarkDiscovery(playerPosition);
-            this.buildTemplesNearPosition(playerPosition);
-            this.buildGroundTilesNearPosition(playerPosition);
+            this.updateStreamingWorld(playerPosition);
             this.updateTheatreCompass(playerPosition);
             this.updateWorldCulling(playerPosition);
         }
@@ -1121,19 +1127,64 @@ export class RoguelikeWorld {
             t.beam.material.opacity = 0.05 + Math.sin(time * 0.5 + t.position.x) * 0.03;
         });
 
-        this.worldObjects.forEach(obj => {
-            if (obj.userData?.isAtmosphere) {
-                const positions = obj.geometry.attributes.position.array;
-                for (let i = 0; i < positions.length; i += 3) {
-                    positions[i] += Math.sin(time + i) * 0.02;
-                    positions[i + 1] += Math.sin(time * 0.5 + i * 0.3) * 0.005;
+        if ((now - this._lastAtmosphereTickMs) >= this._atmosphereTickIntervalMs) {
+            this._lastAtmosphereTickMs = now;
+            this.worldObjects.forEach(obj => {
+                if (obj.userData?.isAtmosphere) {
+                    const positions = obj.geometry.attributes.position.array;
+                    for (let i = 0; i < positions.length; i += 3) {
+                        positions[i] += Math.sin(time + i) * 0.006;
+                        positions[i + 1] += Math.sin(time * 0.5 + i * 0.3) * 0.002;
+                    }
+                    obj.geometry.attributes.position.needsUpdate = true;
                 }
-                obj.geometry.attributes.position.needsUpdate = true;
+                if (obj.userData?.isStars && obj.material) {
+                    obj.material.opacity = 0.62 + Math.sin(time * 0.6) * 0.16;
+                }
+            });
+        }
+    }
+
+    getGroundCoordForPosition(position) {
+        if (!position) return null;
+        return `${Math.round(position.x / this.groundTileSize)}:${Math.round(position.z / this.groundTileSize)}`;
+    }
+
+    getTempleCoordForPosition(position) {
+        if (!position) return null;
+        return `${Math.floor(position.x / this.templeCellSize)}:${Math.floor(position.z / this.templeCellSize)}`;
+    }
+
+    updateStreamingWorld(playerPosition) {
+        const groundCoord = this.getGroundCoordForPosition(playerPosition);
+        if (groundCoord && groundCoord !== this._lastGroundTileCoord) {
+            const t0 = performance.now();
+            this.buildGroundTilesNearPosition(playerPosition);
+            const elapsed = performance.now() - t0;
+            if (elapsed > 6) {
+                console.warn('[PERF][GROUND_TILE_BUILD]', {
+                    elapsedMs: Number(elapsed.toFixed(2)),
+                    coord: groundCoord,
+                    tileCount: this.groundTiles.size
+                });
             }
-            if (obj.userData?.isStars && obj.material) {
-                obj.material.opacity = 0.62 + Math.sin(time * 0.6) * 0.16;
+        }
+
+        const templeCoord = this.getTempleCoordForPosition(playerPosition);
+        if (templeCoord && templeCoord !== this._lastTempleCellCoord) {
+            const t0 = performance.now();
+            this.buildTemplesNearPosition(playerPosition);
+            const elapsed = performance.now() - t0;
+            if (elapsed > 6) {
+                console.warn('[PERF][TEMPLE_BUILD]', {
+                    elapsedMs: Number(elapsed.toFixed(2)),
+                    coord: templeCoord,
+                    temples: this.temples.length,
+                    worldObjects: this.worldObjects.length
+                });
             }
-        });
+            this._lastTempleCellCoord = templeCoord;
+        }
     }
 
     updateWorldCulling(playerPosition) {
@@ -1149,24 +1200,20 @@ export class RoguelikeWorld {
 
         const maxDecorDistance = 420;
         const maxTempleDistance = 720;
-        const intersectsFrustumSafe = (obj) => {
-            if (!obj) return false;
-            if (obj.isMesh && obj.geometry) {
-                if (!obj.geometry.boundingSphere) {
-                    obj.geometry.computeBoundingSphere();
-                }
-                return this._outsideCullFrustum.intersectsObject(obj);
-            }
-            const box = new THREE.Box3().setFromObject(obj);
-            if (box.isEmpty()) return false;
-            return this._outsideCullFrustum.intersectsBox(box);
+        const camForward = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion).normalize();
+        const inViewCone = (objPos, distance, cushion = -0.28) => {
+            if (!objPos) return false;
+            if (distance < 8) return true;
+            const toObj = new THREE.Vector3().subVectors(objPos, cam.position);
+            if (toObj.lengthSq() < 0.0001) return true;
+            toObj.normalize();
+            return camForward.dot(toObj) > cushion;
         };
 
         this.temples.forEach((temple) => {
             if (!temple?.group) return;
             const dist = temple.position.distanceTo(playerPosition);
-            const inFrustum = intersectsFrustumSafe(temple.group);
-            const visible = dist <= maxTempleDistance && inFrustum;
+            const visible = dist <= maxTempleDistance && inViewCone(temple.position, dist, -0.4);
             temple.group.visible = visible;
             if (temple.chest) temple.chest.visible = visible;
         });
@@ -1185,15 +1232,13 @@ export class RoguelikeWorld {
                 return;
             }
             const dist = obj.position ? obj.position.distanceTo(playerPosition) : 0;
-            const inFrustum = intersectsFrustumSafe(obj);
-            obj.visible = dist <= maxDecorDistance && inFrustum;
+            obj.visible = dist <= maxDecorDistance && inViewCone(obj.position, dist);
         });
 
         this.ghosts.forEach((ghost) => {
             if (!ghost?.mesh) return;
             const dist = ghost.position.distanceTo(playerPosition);
-            const inFrustum = intersectsFrustumSafe(ghost.mesh);
-            ghost.mesh.visible = dist <= 260 && inFrustum;
+            ghost.mesh.visible = dist <= 260 && inViewCone(ghost.position, dist, -0.35);
         });
     }
 
@@ -1523,6 +1568,7 @@ export class RoguelikeWorld {
 
     enterWorld(playerPosition) {
         // Always rebuild on fresh outside entry so ambience/temples are guaranteed visible.
+        this.hideTheatre();
         this.buildWorld();
         this.enterTimestamp = Date.now();
         this.showOutsideStateOverlay();
@@ -1620,12 +1666,32 @@ export class RoguelikeWorld {
     }
 
     hideTheatre() {
-        // Hide all current theatre renderables/lights except avatar objects.
+        // Hide theatre renderables/lights while preserving already-built outside objects.
         this.hiddenTheatreObjects = [];
+        const outsideObjects = new Set();
+        this.worldObjects.forEach((obj) => { if (obj) outsideObjects.add(obj); });
+        this.worldLights.forEach((light) => { if (light) outsideObjects.add(light); });
+        this.ghosts.forEach((ghost) => { if (ghost?.mesh) outsideObjects.add(ghost.mesh); });
+        this.temples.forEach((temple) => {
+            if (temple?.group) outsideObjects.add(temple.group);
+            if (temple?.chest) outsideObjects.add(temple.chest);
+            if (temple?.beaconLight) outsideObjects.add(temple.beaconLight);
+            if (temple?.pillarLight) outsideObjects.add(temple.pillarLight);
+        });
+        this.treasureChests.forEach((tc) => { if (tc?.mesh) outsideObjects.add(tc.mesh); });
+
         this.scene.traverse((obj) => {
             const isAvatarObject = !!obj.userData?.userId || (typeof obj.name === 'string' && obj.name.startsWith('avatar_'));
+            const isOutsideObject = outsideObjects.has(obj)
+                || !!obj.userData?.isGroundTile
+                || !!obj.userData?.isAtmosphere
+                || !!obj.userData?.isStars
+                || !!obj.userData?.isTemple
+                || !!obj.userData?.isTempleChest
+                || obj.name === 'outside-theatre-landmark'
+                || obj.name === 'treasure-chest';
             const canHide = obj.visible !== undefined && (obj.isMesh || obj.isPoints || obj.isLine || obj.isLight);
-            if (canHide && !isAvatarObject) {
+            if (canHide && !isAvatarObject && !isOutsideObject) {
                 this.hiddenTheatreObjects.push(obj);
                 obj.visible = false;
             }
@@ -1644,6 +1710,7 @@ export class RoguelikeWorld {
         const outside = document.getElementById('outside-state-overlay');
         if (outside) outside.remove();
         this.hideTheatreCompass();
+        this.showTheatre();
 
         if (this.savedBg) this.scene.background = this.savedBg;
         else this.scene.background = new THREE.Color(0x000011);
@@ -1675,6 +1742,9 @@ export class RoguelikeWorld {
             this.groundTexture.dispose();
             this.groundTexture = null;
         }
+        this._lastGroundTileCoord = null;
+        this._lastTempleCellCoord = null;
+        this._lastAtmosphereTickMs = 0;
         this.walls = []; this.floors = []; this.outdoorObjects = []; this.collectibles = [];
         this.hideTreasurePrompt();
         this.hideTheatreCompass();

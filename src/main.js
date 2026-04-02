@@ -73,6 +73,23 @@ class TheatreApp {
         };
         this.mobileJoystickElements = null;
         this.playerCollisionRadius = 0.45;
+        this.clock = new THREE.Clock();
+        this._lastNetworkSyncMs = 0;
+        this._networkSyncIntervalMs = 66;
+        this.perfDebug = {
+            enabled: true,
+            reportIntervalMs: 2000,
+            lastReportMs: 0,
+            longFrameThresholdMs: 34,
+            frameCount: 0,
+            totalFrameMs: 0,
+            totalMovementMs: 0,
+            totalTheatreMs: 0,
+            totalRenderMs: 0
+        };
+        this._maxFps = 60;
+        this._minFrameIntervalMs = 1000 / this._maxFps;
+        this._lastRenderFrameAt = 0;
         this.itemBonuses = {
             speed: 0,
             power: 0,
@@ -84,9 +101,10 @@ class TheatreApp {
         this._collisionCache = {
             mode: 'theatre',
             lastUpdateMs: 0,
+            signature: '',
             colliders: []
         };
-        this._collisionRefreshIntervalMs = 250;
+        this._collisionRefreshIntervalMs = 1000;
         
         this.init();
         this.setupEventListeners();
@@ -180,12 +198,14 @@ class TheatreApp {
             antialias: false,
             powerPreference: 'high-performance'
         });
-        this.renderer.shadowMap.enabled = true;
+        // Disable real-time shadow maps for stability: many local lights plus
+        // browser/WebGL driver variability can cause large periodic render stalls.
+        this.renderer.shadowMap.enabled = false;
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         console.log('Using WebGL renderer');
         
         this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.0));
         this.renderer.outputColorSpace = THREE.SRGBColorSpace;
         
         // Add renderer to DOM
@@ -1236,7 +1256,11 @@ class TheatreApp {
         this.camera.position.copy(newPosition);
         
         if (this.networkManager && (moveVector.length() > 0 || !this.isOnGround)) {
-            this.networkManager.updatePosition(this.camera.position);
+            const now = performance.now();
+            if ((now - this._lastNetworkSyncMs) >= this._networkSyncIntervalMs) {
+                this.networkManager.updatePosition(this.camera.position);
+                this._lastNetworkSyncMs = now;
+            }
         }
     }
     
@@ -1321,8 +1345,13 @@ class TheatreApp {
     refreshCollisionCache(force = false) {
         const now = performance.now();
         const mode = this.theatre?.roguelikeWorld?.isActive ? 'outside' : 'theatre';
+        const world = this.theatre?.roguelikeWorld;
+        const signature = mode === 'outside'
+            ? `${world?.worldObjects?.length || 0}|${world?.treasureChests?.length || 0}|${world?.temples?.length || 0}`
+            : `${this.theatre?.walls?.length || 0}|${this.scene?.children?.length || 0}`;
         const shouldRefresh = force
             || this._collisionCache.mode !== mode
+            || this._collisionCache.signature !== signature
             || (now - this._collisionCache.lastUpdateMs) >= this._collisionRefreshIntervalMs;
         if (!shouldRefresh) {
             return;
@@ -1339,17 +1368,6 @@ class TheatreApp {
                     if (!box || box.isEmpty()) continue;
                     colliders.push({ mesh: object, box, source: 'omi' });
                 }
-                candidate.traverse((child) => {
-                    if (!child?.isMesh) return;
-                    if (getOMIColliderExtension(child)) return;
-                    if (!this.isMeshCollidable(child)) return;
-                    const box = new THREE.Box3().setFromObject(child);
-                    if (box.isEmpty()) return;
-                    const size = new THREE.Vector3();
-                    box.getSize(size);
-                    if (Math.max(size.x, size.z) < 0.45 && size.y < 0.45) return;
-                    colliders.push({ mesh: child, box, source: 'mesh' });
-                });
                 continue;
             }
         }
@@ -1357,6 +1375,7 @@ class TheatreApp {
         this._collisionCache = {
             mode,
             lastUpdateMs: now,
+            signature,
             colliders
         };
     }
@@ -1431,20 +1450,101 @@ class TheatreApp {
     }
     
     animate() {
-        const deltaTime = 0.016; // Approximate 60fps
-        
+        const frameStart = performance.now();
+        if ((frameStart - this._lastRenderFrameAt) < this._minFrameIntervalMs) {
+            return;
+        }
+        this._lastRenderFrameAt = frameStart;
+        const deltaTime = Math.min(0.05, Math.max(0.008, this.clock.getDelta() || 0.016));
+
+        const moveStart = performance.now();
         this.updateMovement(deltaTime);
+        const moveMs = performance.now() - moveStart;
+
         if (this.omiSeat) {
             this.omiSeat.update();
         }
-        this.theatre.update();
-        
+
+        const theatreStart = performance.now();
+        this.theatre.update(deltaTime);
+        const theatreMs = performance.now() - theatreStart;
+
         // Update wearables animation
         if (this.wearableManager) {
             this.wearableManager.updateWearables(deltaTime);
         }
-        
+
+        const renderStart = performance.now();
         this.renderer.render(this.scene, this.camera);
+        const renderMs = performance.now() - renderStart;
+
+        this.updatePerfDebug(frameStart, moveMs, theatreMs, renderMs, deltaTime);
+    }
+
+    updatePerfDebug(frameStartMs, moveMs, theatreMs, renderMs, deltaTime) {
+        const perf = this.perfDebug;
+        if (!perf?.enabled) return;
+
+        const frameMs = performance.now() - frameStartMs;
+        perf.frameCount += 1;
+        perf.totalFrameMs += frameMs;
+        perf.totalMovementMs += moveMs;
+        perf.totalTheatreMs += theatreMs;
+        perf.totalRenderMs += renderMs;
+
+        if (frameMs >= perf.longFrameThresholdMs) {
+            const world = this.theatre?.roguelikeWorld;
+            const streamActive = !!this.theatre?.hostVideo;
+            console.warn('[PERF][LONG_FRAME]', {
+                frameMs: Number(frameMs.toFixed(2)),
+                dtMs: Number((deltaTime * 1000).toFixed(2)),
+                moveMs: Number(moveMs.toFixed(2)),
+                theatreMs: Number(theatreMs.toFixed(2)),
+                renderMs: Number(renderMs.toFixed(2)),
+                outsideActive: !!world?.isActive,
+                streamActive,
+                temples: world?.temples?.length || 0,
+                ghosts: world?.ghosts?.length || 0,
+                worldObjects: world?.worldObjects?.length || 0,
+                drawCalls: this.renderer?.info?.render?.calls || 0,
+                triangles: this.renderer?.info?.render?.triangles || 0
+            });
+        }
+
+        const now = performance.now();
+        if ((now - perf.lastReportMs) < perf.reportIntervalMs) return;
+
+        const frames = Math.max(1, perf.frameCount);
+        const avgFrameMs = perf.totalFrameMs / frames;
+        const fps = 1000 / Math.max(1, avgFrameMs);
+        const world = this.theatre?.roguelikeWorld;
+        const memoryInfo = this.renderer?.info?.memory || {};
+        const renderInfo = this.renderer?.info?.render || {};
+
+        console.log('[PERF][SUMMARY]', {
+            fps: Number(fps.toFixed(1)),
+            avgFrameMs: Number(avgFrameMs.toFixed(2)),
+            avgMoveMs: Number((perf.totalMovementMs / frames).toFixed(2)),
+            avgTheatreMs: Number((perf.totalTheatreMs / frames).toFixed(2)),
+            avgRenderMs: Number((perf.totalRenderMs / frames).toFixed(2)),
+            mode: world?.isActive ? 'outside' : 'theatre',
+            streamActive: !!this.theatre?.hostVideo,
+            users: this.theatre?.users?.size || 0,
+            worldObjects: world?.worldObjects?.length || 0,
+            temples: world?.temples?.length || 0,
+            ghosts: world?.ghosts?.length || 0,
+            drawCalls: renderInfo.calls || 0,
+            triangles: renderInfo.triangles || 0,
+            geometries: memoryInfo.geometries || 0,
+            textures: memoryInfo.textures || 0
+        });
+
+        perf.lastReportMs = now;
+        perf.frameCount = 0;
+        perf.totalFrameMs = 0;
+        perf.totalMovementMs = 0;
+        perf.totalTheatreMs = 0;
+        perf.totalRenderMs = 0;
     }
     
     onWindowResize() {

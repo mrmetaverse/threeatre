@@ -103,7 +103,8 @@ export class AvatarManager {
                         scene: vrm.scene,
                         userData: userData,
                         animations: gltf.animations || [],
-                        mixer: new THREE.AnimationMixer(vrm.scene)
+                        mixer: new THREE.AnimationMixer(vrm.scene),
+                        blinkIntervalId: vrm.scene.userData.blinkIntervalId || null
                     });
                     this.avatarActivity.set(userId, true);
                     
@@ -505,10 +506,9 @@ export class AvatarManager {
         // Setup basic expressions for VRM
         const expressions = vrm.expressionManager;
         if (!expressions) return;
-        
-        // You can add automatic expressions here
-        // For example, random blinking:
-        setInterval(() => {
+
+        // Store interval so it can be cleaned up on avatar removal.
+        const blinkIntervalId = setInterval(() => {
             if (expressions.getExpressionTrackName('blink')) {
                 expressions.setValue('blink', 1.0);
                 setTimeout(() => {
@@ -516,6 +516,8 @@ export class AvatarManager {
                 }, 150);
             }
         }, 3000 + Math.random() * 2000); // Random blink every 3-5 seconds
+
+        vrm.scene.userData.blinkIntervalId = blinkIntervalId;
     }
     
     updateAvatar(userId, position, rotation) {
@@ -540,14 +542,6 @@ export class AvatarManager {
                 lookAtTarget.z -= 1;
                 avatar.vrm.lookAt.target.position.copy(lookAtTarget);
             }
-            
-            // Update VRM
-            avatar.vrm.update(0.016); // Assume 60fps
-        }
-        
-        // Update animation mixer
-        if (avatar.mixer) {
-            avatar.mixer.update(0.016);
         }
     }
     
@@ -558,9 +552,16 @@ export class AvatarManager {
         // Remove from scene
         this.scene.remove(avatar.scene);
         
+        if (avatar.blinkIntervalId) {
+            clearInterval(avatar.blinkIntervalId);
+            avatar.blinkIntervalId = null;
+        }
+
         // Clean up VRM
         if (avatar.type === 'vrm' && avatar.vrm) {
-            avatar.vrm.dispose();
+            if (typeof avatar.vrm.dispose === 'function') {
+                avatar.vrm.dispose();
+            }
         }
         
         // Clean up OMI audio
@@ -570,7 +571,9 @@ export class AvatarManager {
                 if (audioNode.audio.isPlaying) {
                     audioNode.audio.stop();
                 }
-                audioNode.audio.disconnect();
+                if (typeof audioNode.audio.disconnect === 'function') {
+                    audioNode.audio.disconnect();
+                }
             });
             this.omiAudioNodes.delete(userId);
         }

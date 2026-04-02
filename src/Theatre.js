@@ -23,6 +23,7 @@ export class Theatre {
         this._streamCtx = null;
         this._streamFrameIntervalMs = 1000 / 20;
         this._lastStreamFrameMs = 0;
+        this._lastStreamPerfWarnMs = 0;
         this._cullFrustum = new THREE.Frustum();
         this._cullProjScreen = new THREE.Matrix4();
         this._avatarCullDistance = 140;
@@ -31,6 +32,9 @@ export class Theatre {
         this._lastTransitionCheckPosition = null;
         this._lastWorldTransitionAt = 0;
         this._worldTransitionCooldownMs = 450;
+        this._torchFlickerLights = [];
+        this._exitPulseLight = null;
+        this._runePulseMaterials = [];
         this.theatreSpeakerAnchors = [];
         this.theatreSpeakerAudioNodes = [];
         this._theatreSpeakerAudioUnlocked = false;
@@ -434,11 +438,10 @@ export class Theatre {
             rune.position.set(pos[0], pos[1], pos[2]);
             rune.rotation.x = -Math.PI / 2;
             this.scene.add(rune);
-            
-            // Make runes glow and pulse
-            setInterval(() => {
-                runeMaterial.opacity = 0.3 + Math.sin(Date.now() * 0.003 + pos[0]) * 0.3;
-            }, 50);
+            this._runePulseMaterials.push({
+                material: runeMaterial,
+                phase: pos[0]
+            });
         });
     }
     
@@ -560,22 +563,20 @@ export class Theatre {
             torchLight.position.set(pos[0], pos[1], pos[2]);
             torchLight.castShadow = true;
             this.scene.add(torchLight);
-            
-            // Flickering effect
-            setInterval(() => {
-                torchLight.intensity = 1.2 + Math.random() * 1.2;
-            }, 100 + Math.random() * 200);
+            this._torchFlickerLights.push({
+                light: torchLight,
+                min: 1.2,
+                max: 2.4,
+                speed: 2.2 + Math.random() * 2.4,
+                phase: Math.random() * Math.PI * 2
+            });
         });
         
         // Ominous exit lighting - red and foreboding, scaled up
         const exitLight = new THREE.PointLight(0xff0000, 0.9, 36);
         exitLight.position.set(0, 24, 54);
         this.scene.add(exitLight);
-        
-        // Make exit light pulse ominously
-        setInterval(() => {
-            exitLight.intensity = 0.6 + Math.sin(Date.now() * 0.005) * 0.6;
-        }, 50);
+        this._exitPulseLight = exitLight;
     }
     
     setupTheatreAudio() {
@@ -631,7 +632,7 @@ export class Theatre {
     
     setHostStream(stream, isLocalHost = false) {
         this.stopHostStream();
-        this._streamFrameIntervalMs = isLocalHost ? (1000 / 12) : (1000 / 20);
+        this._streamFrameIntervalMs = isLocalHost ? (1000 / 8) : (1000 / 12);
         this._lastStreamFrameMs = 0;
 
         const video = document.createElement('video');
@@ -661,7 +662,7 @@ export class Theatre {
             if (this.videoTexture) this.videoTexture.dispose();
 
             // Local host preview is intentionally lighter to avoid GPU spikes/crashes.
-            const texW = Math.min(w, isLocalHost ? 960 : 1280);
+            const texW = Math.min(w, isLocalHost ? 640 : 960);
             const texH = Math.round(texW / ar);
 
             this._streamCanvas = document.createElement('canvas');
@@ -1016,13 +1017,27 @@ export class Theatre {
     }
     
     update(deltaTime = 0.016) {
+        const nowSeconds = performance.now() * 0.001;
+        this.animateTheatreVisualEffects(nowSeconds);
+
         if (this._streamCtx && this.hostVideo && this.hostVideo.readyState >= 2) {
+            if (document.hidden) return;
             const now = performance.now();
             if ((now - this._lastStreamFrameMs) >= this._streamFrameIntervalMs) {
+                const uploadStart = performance.now();
                 this._streamCtx.drawImage(this.hostVideo, 0, 0,
                     this._streamCanvas.width, this._streamCanvas.height);
                 this.videoTexture.needsUpdate = true;
                 this._lastStreamFrameMs = now;
+                const uploadMs = performance.now() - uploadStart;
+                if (uploadMs > 8 && (now - this._lastStreamPerfWarnMs) > 1000) {
+                    this._lastStreamPerfWarnMs = now;
+                    console.warn('[PERF][STREAM_UPLOAD]', {
+                        uploadMs: Number(uploadMs.toFixed(2)),
+                        canvas: `${this._streamCanvas.width}x${this._streamCanvas.height}`,
+                        localHost: this._streamFrameIntervalMs >= (1000 / 8)
+                    });
+                }
             }
         }
 
@@ -1053,6 +1068,25 @@ export class Theatre {
                 user.avatar.position.y = originalY + Math.sin(time + user.id.length) * 0.02;
             }
         });
+    }
+
+    animateTheatreVisualEffects(nowSeconds) {
+        for (const entry of this._runePulseMaterials) {
+            if (!entry?.material) continue;
+            entry.material.opacity = 0.3 + Math.sin(nowSeconds * 3 + entry.phase) * 0.22;
+        }
+
+        for (const entry of this._torchFlickerLights) {
+            if (!entry?.light) continue;
+            const n = 0.5 + (Math.sin(nowSeconds * entry.speed + entry.phase) * 0.35)
+                + (Math.sin(nowSeconds * (entry.speed * 2.1) + (entry.phase * 1.7)) * 0.15);
+            const normalized = THREE.MathUtils.clamp(n, 0, 1);
+            entry.light.intensity = entry.min + ((entry.max - entry.min) * normalized);
+        }
+
+        if (this._exitPulseLight) {
+            this._exitPulseLight.intensity = 0.75 + Math.sin(nowSeconds * 2.2) * 0.4;
+        }
     }
 
     updateAvatarCulling(playerPosition) {
