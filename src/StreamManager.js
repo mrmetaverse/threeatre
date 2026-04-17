@@ -18,9 +18,10 @@ export class StreamManager {
             { urls: 'turns:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
         ];
 
-        this.maxBitrate = 2_000_000;
-        this.minBitrate = 500_000;
-        this.currentBitrate = 2_000_000;
+        this.maxBitrate = 1_400_000;
+        this.minBitrate = 250_000;
+        this.currentBitrate = 1_000_000;
+        this.maxSenderFramerate = 15;
         this.bitrateInterval = null;
         this.statsInterval = null;
         this.prevStats = new Map();
@@ -55,9 +56,9 @@ export class StreamManager {
                 this.hostStream = await navigator.mediaDevices.getDisplayMedia({
                     video: {
                         cursor: 'always',
-                        width: { ideal: 1280, max: 1920 },
-                        height: { ideal: 720, max: 1080 },
-                        frameRate: { ideal: 24, max: 30 }
+                        width: { ideal: 1280, max: 1280 },
+                        height: { ideal: 720, max: 720 },
+                        frameRate: { ideal: 15, max: 20 }
                     },
                     audio: true,
                     systemAudio: 'include'
@@ -71,7 +72,16 @@ export class StreamManager {
 
             const vt = this.hostStream.getVideoTracks()[0];
             if (vt) {
-                vt.contentHint = 'motion';
+                vt.contentHint = 'detail';
+                try {
+                    await vt.applyConstraints({
+                        width: { ideal: 1280, max: 1280 },
+                        height: { ideal: 720, max: 720 },
+                        frameRate: { ideal: 15, max: 20 }
+                    });
+                } catch (e) {
+                    // Browser may reject tight constraints depending capture source.
+                }
                 const s = vt.getSettings();
                 console.log('Capture:', s.width, 'x', s.height, '@', s.frameRate, 'fps');
             }
@@ -197,7 +207,7 @@ export class StreamManager {
             if (!params.encodings?.length) params.encodings = [{}];
 
             params.encodings[0].maxBitrate = this.currentBitrate;
-            params.encodings[0].maxFramerate = 30;
+            params.encodings[0].maxFramerate = this.maxSenderFramerate;
             params.encodings[0].networkPriority = 'high';
             params.encodings[0].priority = 'high';
             params.encodings[0].scaleResolutionDownBy = 1.0;
@@ -432,9 +442,9 @@ export class StreamManager {
     }
 
     adjustBitrate(direction, lossRate, rtt) {
-        const step = 250_000;
+        const step = 150_000;
         if (direction < 0) {
-            this.currentBitrate = Math.max(this.minBitrate, this.currentBitrate - step * 2);
+            this.currentBitrate = Math.max(this.minBitrate, this.currentBitrate - step);
         } else {
             this.currentBitrate = Math.min(this.maxBitrate, this.currentBitrate + step);
         }
@@ -446,6 +456,7 @@ export class StreamManager {
                         const params = sender.getParameters();
                         if (params.encodings?.length) {
                             params.encodings[0].maxBitrate = this.currentBitrate;
+                            params.encodings[0].maxFramerate = this.maxSenderFramerate;
                             sender.setParameters(params).catch(() => {});
                         }
                     } catch (e) { /* ignore */ }

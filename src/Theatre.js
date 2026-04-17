@@ -24,6 +24,14 @@ export class Theatre {
         this._streamFrameIntervalMs = 1000 / 20;
         this._lastStreamFrameMs = 0;
         this._lastStreamPerfWarnMs = 0;
+        this._streamPerformanceLevel = 0;
+        this._streamIsLocalHost = false;
+        this._streamSourceWidth = 0;
+        this._streamSourceHeight = 0;
+        this._streamHasPendingVideoFrame = false;
+        this._streamUseVideoFrameCallback = (typeof HTMLVideoElement !== 'undefined')
+            && ('requestVideoFrameCallback' in HTMLVideoElement.prototype);
+        this._streamVideoFrameCallbackId = null;
         this._cullFrustum = new THREE.Frustum();
         this._cullProjScreen = new THREE.Matrix4();
         this._avatarCullDistance = 140;
@@ -632,7 +640,8 @@ export class Theatre {
     
     setHostStream(stream, isLocalHost = false) {
         this.stopHostStream();
-        this._streamFrameIntervalMs = isLocalHost ? (1000 / 8) : (1000 / 12);
+        this._streamIsLocalHost = !!isLocalHost;
+        this._updateStreamFrameIntervalForPerformance();
         this._lastStreamFrameMs = 0;
 
         const video = document.createElement('video');
@@ -655,35 +664,13 @@ export class Theatre {
             const w = video.videoWidth;
             const h = video.videoHeight;
             const ar = w / h;
+            this._streamSourceWidth = w;
+            this._streamSourceHeight = h;
             console.log('Stream:', w, 'x', h, '| audio tracks:', stream.getAudioTracks().length, '| local:', isLocalHost);
 
             this.adjustScreenToContent(ar);
 
-            if (this.videoTexture) this.videoTexture.dispose();
-
-            // Local host preview is intentionally lighter to avoid GPU spikes/crashes.
-            const texW = Math.min(w, isLocalHost ? 640 : 960);
-            const texH = Math.round(texW / ar);
-
-            this._streamCanvas = document.createElement('canvas');
-            this._streamCanvas.width = texW;
-            this._streamCanvas.height = texH;
-            this._streamCtx = this._streamCanvas.getContext('2d', { alpha: false, willReadFrequently: false });
-
-            this.videoTexture = new THREE.CanvasTexture(this._streamCanvas);
-            this.videoTexture.minFilter = THREE.LinearFilter;
-            this.videoTexture.magFilter = THREE.LinearFilter;
-            this.videoTexture.generateMipmaps = false;
-            this.videoTexture.colorSpace = THREE.SRGBColorSpace;
-
-            this.screen.material.dispose();
-            this.screen.material = new THREE.MeshBasicMaterial({
-                map: this.videoTexture,
-                side: THREE.DoubleSide,
-                toneMapped: false
-            });
-
-            console.log('Stream texture:', texW, 'x', texH, '(canvas-based)');
+            this.rebuildStreamCanvasTexture();
 
             if (!isLocalHost && hasAudio) {
                 this.showUnmuteOverlay(video);
@@ -692,6 +679,7 @@ export class Theatre {
 
         video.addEventListener('canplay', () => {
             video.play().catch(() => {});
+            this._startStreamFrameCallbacks();
         });
 
         if (!isLocalHost) {
@@ -788,10 +776,14 @@ export class Theatre {
 
         this.removeUnmuteOverlay();
         this.clearTheatreSpeakerAudio();
+        this._stopStreamFrameCallbacks();
 
         this._streamCanvas = null;
         this._streamCtx = null;
         this._lastStreamFrameMs = 0;
+        this._streamSourceWidth = 0;
+        this._streamSourceHeight = 0;
+        this._streamHasPendingVideoFrame = false;
 
         if (this.hostVideo) {
             this.hostVideo.pause();
@@ -1021,14 +1013,21 @@ export class Theatre {
         this.animateTheatreVisualEffects(nowSeconds);
 
         if (this._streamCtx && this.hostVideo && this.hostVideo.readyState >= 2) {
-            if (document.hidden) return;
+            if (document.hidden) {
+                this._streamHasPendingVideoFrame = false;
+            } else {
             const now = performance.now();
-            if ((now - this._lastStreamFrameMs) >= this._streamFrameIntervalMs) {
+                const frameIntervalElapsed = (now - this._lastStreamFrameMs) >= this._streamFrameIntervalMs;
+                const shouldUploadFrame = this._streamUseVideoFrameCallback
+                    ? (this._streamHasPendingVideoFrame && frameIntervalElapsed)
+                    : frameIntervalElapsed;
+                if (shouldUploadFrame) {
                 const uploadStart = performance.now();
                 this._streamCtx.drawImage(this.hostVideo, 0, 0,
                     this._streamCanvas.width, this._streamCanvas.height);
                 this.videoTexture.needsUpdate = true;
                 this._lastStreamFrameMs = now;
+                    this._streamHasPendingVideoFrame = false;
                 const uploadMs = performance.now() - uploadStart;
                 if (uploadMs > 8 && (now - this._lastStreamPerfWarnMs) > 1000) {
                     this._lastStreamPerfWarnMs = now;
@@ -1038,6 +1037,7 @@ export class Theatre {
                         localHost: this._streamFrameIntervalMs >= (1000 / 8)
                     });
                 }
+            }
             }
         }
 
@@ -1087,6 +1087,86 @@ export class Theatre {
         if (this._exitPulseLight) {
             this._exitPulseLight.intensity = 0.75 + Math.sin(nowSeconds * 2.2) * 0.4;
         }
+    }
+
+    setStreamPerformanceLevel(level = 0) {
+        const next = THREE.MathUtils.clamp(Math.floor(level), 0, 2);
+        if (this._streamPerformanceLevel === next) return;
+        this._streamPerformanceLevel = next;
+        this._updateStreamFrameIntervalForPerformance();
+        this.rebuildStreamCanvasTexture();
+        console.log('[PERF][STREAM_QUALITY]', {
+            level: this._streamPerformanceLevel,
+            frameIntervalMs: Math.round(this._streamFrameIntervalMs)
+        });
+    }
+
+    _updateStreamFrameIntervalForPerformance() {
+        const localIntervals = [1000 / 8, 1000 / 6, 1000 / 4];
+        const remoteIntervals = [1000 / 12, 1000 / 8, 1000 / 6];
+        const table = this._streamIsLocalHost ? localIntervals : remoteIntervals;
+        this._streamFrameIntervalMs = table[this._streamPerformanceLevel] || table[0];
+    }
+
+    _getTargetStreamTextureWidth() {
+        if (!this._streamSourceWidth) return 0;
+        const localMaxWidths = [640, 512, 426];
+        const remoteMaxWidths = [960, 720, 540];
+        const limits = this._streamIsLocalHost ? localMaxWidths : remoteMaxWidths;
+        const maxW = limits[this._streamPerformanceLevel] || limits[0];
+        return Math.max(320, Math.min(this._streamSourceWidth, maxW));
+    }
+
+    rebuildStreamCanvasTexture() {
+        if (!this.hostVideo || !this._streamSourceWidth || !this._streamSourceHeight || !this.screen) return;
+        const ar = this._streamSourceWidth / this._streamSourceHeight;
+        const texW = this._getTargetStreamTextureWidth();
+        const texH = Math.max(180, Math.round(texW / ar));
+
+        this._streamCanvas = document.createElement('canvas');
+        this._streamCanvas.width = texW;
+        this._streamCanvas.height = texH;
+        this._streamCtx = this._streamCanvas.getContext('2d', { alpha: false, willReadFrequently: false });
+
+        if (this.videoTexture) this.videoTexture.dispose();
+        this.videoTexture = new THREE.CanvasTexture(this._streamCanvas);
+        this.videoTexture.minFilter = THREE.LinearFilter;
+        this.videoTexture.magFilter = THREE.LinearFilter;
+        this.videoTexture.generateMipmaps = false;
+        this.videoTexture.colorSpace = THREE.SRGBColorSpace;
+
+        this.screen.material.dispose();
+        this.screen.material = new THREE.MeshBasicMaterial({
+            map: this.videoTexture,
+            side: THREE.DoubleSide,
+            toneMapped: false
+        });
+
+        console.log('Stream texture:', texW, 'x', texH, '(adaptive)');
+    }
+
+    _startStreamFrameCallbacks() {
+        if (!this._streamUseVideoFrameCallback || !this.hostVideo) return;
+        this._stopStreamFrameCallbacks();
+        const onVideoFrame = () => {
+            this._streamHasPendingVideoFrame = true;
+            if (this.hostVideo && this._streamUseVideoFrameCallback) {
+                this._streamVideoFrameCallbackId = this.hostVideo.requestVideoFrameCallback(onVideoFrame);
+            }
+        };
+        this._streamVideoFrameCallbackId = this.hostVideo.requestVideoFrameCallback(onVideoFrame);
+    }
+
+    _stopStreamFrameCallbacks() {
+        if (!this.hostVideo || !this._streamUseVideoFrameCallback) return;
+        if (this._streamVideoFrameCallbackId !== null && typeof this.hostVideo.cancelVideoFrameCallback === 'function') {
+            try {
+                this.hostVideo.cancelVideoFrameCallback(this._streamVideoFrameCallbackId);
+            } catch (e) {
+                // no-op
+            }
+        }
+        this._streamVideoFrameCallbackId = null;
     }
 
     updateAvatarCulling(playerPosition) {

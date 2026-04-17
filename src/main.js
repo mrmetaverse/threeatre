@@ -90,6 +90,10 @@ class TheatreApp {
         this._maxFps = 60;
         this._minFrameIntervalMs = 1000 / this._maxFps;
         this._lastRenderFrameAt = 0;
+        this._adaptiveQualityLevel = 0;
+        this._lastAdaptiveQualityChangeMs = 0;
+        this._lastAdaptiveQualityStableMs = 0;
+        this._consecutiveHeavyRenderFrames = 0;
         this.itemBonuses = {
             speed: 0,
             power: 0,
@@ -1448,6 +1452,33 @@ class TheatreApp {
         this.controls.speed = this.baseWalkSpeed + (this.itemBonuses.speed * 0.7);
         this.controls.sprintSpeed = this.baseSprintSpeed + (this.itemBonuses.speed * 1.2);
     }
+
+    setAdaptiveQualityLevel(level, reason = 'auto') {
+        const nextLevel = THREE.MathUtils.clamp(Math.floor(level), 0, 2);
+        if (nextLevel === this._adaptiveQualityLevel) return;
+
+        this._adaptiveQualityLevel = nextLevel;
+        this._lastAdaptiveQualityChangeMs = performance.now();
+
+        const maxFpsByLevel = [60, 45, 30];
+        const pixelRatioByLevel = [1.0, 0.85, 0.7];
+
+        this._maxFps = maxFpsByLevel[nextLevel] || 60;
+        this._minFrameIntervalMs = 1000 / this._maxFps;
+        const pixelRatioCap = pixelRatioByLevel[nextLevel] || 1.0;
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, pixelRatioCap));
+
+        if (this.theatre?.setStreamPerformanceLevel) {
+            this.theatre.setStreamPerformanceLevel(nextLevel);
+        }
+
+        console.warn('[PERF][ADAPTIVE_QUALITY]', {
+            level: nextLevel,
+            reason,
+            maxFps: this._maxFps,
+            pixelRatioCap
+        });
+    }
     
     animate() {
         const frameStart = performance.now();
@@ -1495,6 +1526,11 @@ class TheatreApp {
         if (frameMs >= perf.longFrameThresholdMs) {
             const world = this.theatre?.roguelikeWorld;
             const streamActive = !!this.theatre?.hostVideo;
+            if (renderMs > 180) {
+                this._consecutiveHeavyRenderFrames += 1;
+            } else {
+                this._consecutiveHeavyRenderFrames = Math.max(0, this._consecutiveHeavyRenderFrames - 1);
+            }
             console.warn('[PERF][LONG_FRAME]', {
                 frameMs: Number(frameMs.toFixed(2)),
                 dtMs: Number((deltaTime * 1000).toFixed(2)),
@@ -1509,6 +1545,11 @@ class TheatreApp {
                 drawCalls: this.renderer?.info?.render?.calls || 0,
                 triangles: this.renderer?.info?.render?.triangles || 0
             });
+        }
+
+        if (this._consecutiveHeavyRenderFrames >= 3) {
+            this._consecutiveHeavyRenderFrames = 0;
+            this.setAdaptiveQualityLevel(this._adaptiveQualityLevel + 1, 'heavy-render-burst');
         }
 
         const now = performance.now();
@@ -1538,6 +1579,19 @@ class TheatreApp {
             geometries: memoryInfo.geometries || 0,
             textures: memoryInfo.textures || 0
         });
+
+        const adaptiveCooldownMs = 10000;
+        if (avgFrameMs < 11 && this._adaptiveQualityLevel > 0) {
+            if (!this._lastAdaptiveQualityStableMs) {
+                this._lastAdaptiveQualityStableMs = now;
+            } else if ((now - this._lastAdaptiveQualityStableMs) > adaptiveCooldownMs
+                && (now - this._lastAdaptiveQualityChangeMs) > adaptiveCooldownMs) {
+                this.setAdaptiveQualityLevel(this._adaptiveQualityLevel - 1, 'stable-frame-time');
+                this._lastAdaptiveQualityStableMs = 0;
+            }
+        } else {
+            this._lastAdaptiveQualityStableMs = 0;
+        }
 
         perf.lastReportMs = now;
         perf.frameCount = 0;
